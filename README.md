@@ -30,6 +30,15 @@ cd claude-sessions-manager-tui
 ./uninstall.sh
 ```
 
+## Development
+
+```bash
+git clone https://github.com/AbdelzaherAbdelgwad/claude-sessions-manager-tui.git
+cd claude-sessions-manager-tui
+bun install
+bun App.tsx
+```
+
 ## Keybindings
 
 ### Navigation (NORMAL mode)
