@@ -9,11 +9,25 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - [Bun](https://bun.com) v1.3+
 - [Claude Code](https://claude.ai/code) installed and authenticated (`claude` in PATH)
 
-## Install & Run
+## Install
 
 ```bash
-bun install
-bun App.tsx
+git clone https://github.com/AbdelzaherAbdelgwad/claude-sessions-manager-tui.git
+cd claude-sessions-manager-tui
+./install.sh
+```
+
+Then launch with:
+
+```bash
+csm
+```
+
+## Uninstall
+
+```bash
+cd claude-sessions-manager-tui
+./uninstall.sh
 ```
 
 ## Keybindings
