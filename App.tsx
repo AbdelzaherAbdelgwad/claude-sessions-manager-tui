@@ -2,11 +2,10 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { createCliRenderer, LayoutEvents, type BoxRenderable } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import { xtermColor, cellAttrs, DEFAULT_FG, DEFAULT_BG } from "./src/colors"
-import { ptySessions, spawnSession, killSession } from "./src/pty"
+import { ptySessions, spawnSession, killSession, pinnedToBottom } from "./src/pty"
 import type { Mode, Session } from "./src/types"
 import { SessionList } from "./src/components/SessionList"
 import { TerminalView } from "./src/components/TerminalView"
-import { MessageInput } from "./src/components/MessageInput"
 import { StatusBar } from "./src/components/StatusBar"
 import { DeleteConfirmModal } from "./src/components/DeleteConfirmModal"
 import { HelpModal } from "./src/components/HelpModal"
@@ -18,12 +17,10 @@ function App() {
   const [sessions, setSessions] = useState<Session[]>([{ id: 1, name: "Session 1" }])
   const [activeId, setActiveId] = useState(1)
   const [highlightedIdx, setHighlightedIdx] = useState(0)
-  const [inputValue, setInputValue] = useState("")
   const [mode, setMode] = useState<Mode>("normal")
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null)
   const [mouseEnabled, setMouseEnabled] = useState(true)
   const [showHelp, setShowHelp] = useState(false)
-  const [copied, setCopied] = useState(false)
 
   const termBoxRef = useRef<BoxRenderable | null>(null)
   const spawnedIds = useRef(new Set<number>())
@@ -32,7 +29,6 @@ function App() {
   const sessionsRef = useRef(sessions)
   const highlightedIdxRef = useRef(0)
   const showHelpRef = useRef(false)
-
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
   useEffect(() => { modeRef.current = mode }, [mode])
   useEffect(() => { sessionsRef.current = sessions }, [sessions])
@@ -92,24 +88,21 @@ function App() {
 
   // ── Scroll + clipboard ─────────────────────────────────────────────────────
 
-  const scroll = (lines: number) => {
-    const s = ptySessions.get(activeIdRef.current)
-    if (s) { s.xterm.scrollLines(lines); renderer.requestRender() }
-  }
-
-  const copyBuffer = () => {
-    const s = ptySessions.get(activeIdRef.current)
+  const scroll = (lines: number, seq?: string) => {
+    const id = activeIdRef.current
+    const s = ptySessions.get(id)
     if (!s) return
-    const buf = s.xterm.buffer.active
-    const lines: string[] = []
-    for (let i = 0; i < buf.length; i++) {
-      const line = buf.getLine(i)
-      if (line) lines.push(line.translateToString(true))
+    // In alternate screen (fullscreen mode) forward to PTY — Claude Code handles scrolling
+    if (s.xterm.buffer.active === s.xterm.buffer.alternate) {
+      if (seq) s.pty.write(seq)
+      return
     }
-    while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop()
-    renderer.copyToClipboardOSC52(lines.join("\n"))
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    s.xterm.scrollLines(lines)
+    const buf = s.xterm.buffer.active
+    const atBottom = buf.viewportY + s.xterm.rows >= buf.length
+    if (atBottom) pinnedToBottom.add(id)
+    else pinnedToBottom.delete(id)
+    renderer.requestRender()
   }
 
   // ── Session lifecycle ──────────────────────────────────────────────────────
@@ -144,19 +137,6 @@ function App() {
     setDeleteConfirm(null)
   }
 
-  const handleSubmit = (value: string) => {
-    const message = value.trim()
-    if (!message) return
-    const s = ptySessions.get(activeId)
-    if (!s) return
-    setInputValue("")
-    setSessions(prev => prev.map(s =>
-      s.id === activeId && s.name.startsWith("Session ")
-        ? { ...s, name: message.length > 28 ? message.slice(0, 28) + "…" : message }
-        : s
-    ))
-    s.pty.write(message + "\r")
-  }
 
   // ── Keyboard handler ───────────────────────────────────────────────────────
 
@@ -171,10 +151,10 @@ function App() {
         return true
       }
 
-      if (seq === "\x1b[5~") { scroll(-10); return true }
-      if (seq === "\x1b[6~") { scroll(10); return true }
-      if (seq === "\x1b[1;5A") { scroll(-3); return true }
-      if (seq === "\x1b[1;5B") { scroll(3); return true }
+      if (seq === "\x1b[5~") { scroll(-10, seq); return true }
+      if (seq === "\x1b[6~") { scroll(10, seq); return true }
+      if (seq === "\x1b[1;5A") { scroll(-3, seq); return true }
+      if (seq === "\x1b[1;5B") { scroll(3, seq); return true }
 
       const mode = modeRef.current
 
@@ -186,9 +166,7 @@ function App() {
         if (seq === "i" || seq === "a") { setMode("insert"); return true }
         if (seq === "n") { addSession(); return true }
         if (seq === "d") { setDeleteConfirm(sessionsRef.current[highlightedIdxRef.current]?.id ?? null); return true }
-        if (seq === "y") { copyBuffer(); return true }
         if (seq === "m") { const next = !renderer.useMouse; renderer.useMouse = next; setMouseEnabled(next); return true }
-        if ("12345".includes(seq) && seq.length === 1) { ptySessions.get(activeIdRef.current)?.pty.write(seq + "\r"); return true }
         if (seq === "?") { setShowHelp(v => !v); return true }
         if (seq === "\x1b") { ptySessions.get(activeIdRef.current)?.pty.write(seq); return true }
         if (seq.startsWith("\x1b[")) { ptySessions.get(activeIdRef.current)?.pty.write(seq); return true }
@@ -197,10 +175,11 @@ function App() {
 
       if (mode === "insert") {
         if (seq === "\x1b") { setMode("normal"); return true }
-        return false
+        ptySessions.get(activeIdRef.current)?.pty.write(seq)
+        return true
       }
 
-      return false
+return false
     }
     renderer.prependInputHandler(handler)
     return () => renderer.removeInputHandler(handler)
@@ -220,6 +199,8 @@ function App() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   const activeName = sessions.find(s => s.id === activeId)?.name ?? ""
+  const activeSession = ptySessions.get(activeId)
+  const isAltScreen = !activeSession?.hasData || (activeSession.xterm.buffer.active === activeSession.xterm.buffer.alternate)
   const isInsert = mode === "insert"
 
   return (
@@ -241,20 +222,13 @@ function App() {
             title={activeName}
             mouseEnabled={mouseEnabled}
             termBoxRef={termBoxRef}
-            onMouseDown={() => setMode("normal")}
-          />
-          <MessageInput
-            isInsert={isInsert}
-            value={inputValue}
-            onInput={setInputValue}
-            onSubmit={handleSubmit}
             onMouseDown={() => setMode("insert")}
           />
         </box>
 
       </box>
 
-      <StatusBar isInsert={isInsert} activeName={activeName} copied={copied} />
+      <StatusBar mode={mode} activeName={activeName} isAltScreen={isAltScreen} />
 
       {deleteConfirm !== null && (
         <DeleteConfirmModal

@@ -9,4 +9,5 @@ export interface PtySession {
   xterm: any
   pty: Bun.Terminal
   proc: ReturnType<typeof Bun.spawn>
+  hasData: boolean
 }
