@@ -149,7 +149,6 @@ function App() {
     const s = sessionsRef.current[idx]
     if (!s) return
     setActiveId(s.id)
-    setMode("insert")
   }
 
   const addSession = () => {
@@ -160,7 +159,6 @@ function App() {
       return next
     })
     setActiveId(id)
-    setMode("insert")
   }
 
   const toggleFavorite = (id: number) => {
@@ -295,7 +293,7 @@ function App() {
             activeId={activeId}
             highlightedIdx={highlightedIdx}
             isInsert={isInsert}
-            onSelect={(s, i) => { setActiveId(s.id); setHighlightedIdx(i); setMode("insert"); activeIdRef.current = s.id }}
+            onSelect={(s, i) => { setActiveId(s.id); setHighlightedIdx(i); activeIdRef.current = s.id }}
             onDelete={id => setDeleteConfirm(id)}
             onAdd={addSession}
             renaming={renaming}
