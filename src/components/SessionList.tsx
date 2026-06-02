@@ -12,14 +12,19 @@ interface Props {
   renameInput?: string
   searchQuery?: string
   searching?: boolean
+  activeSessions?: Map<number, boolean>
+  spinnerFrame?: number
 }
 
-export function SessionList({ sessions, activeId, highlightedIdx, isInsert, onSelect, onDelete, onAdd, renaming, renameInput, searchQuery, searching }: Props) {
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+export function SessionList({ sessions, activeId, highlightedIdx, isInsert, onSelect, onDelete, onAdd, renaming, renameInput, searchQuery, searching, activeSessions, spinnerFrame = 0 }: Props) {
   return (
     <box style={{ width: "100%", height: "100%", flexDirection: "row", paddingY: 0, gap: 1 }}>
       {sessions.map((s, i) => {
         const active = s.id === activeId
         const highlighted = i === highlightedIdx && !isInsert
+        const busy = activeSessions?.get(s.id)
         return (
           <box
             key={s.id}
@@ -39,6 +44,9 @@ export function SessionList({ sessions, activeId, highlightedIdx, isInsert, onSe
             {s.favorite && (
               <text style={{ fg: "#FFD700", marginRight: 1 }}>★</text>
             )}
+            <text style={{ fg: busy ? "#00FF88" : "#444444", marginRight: 1 }}>
+              {busy ? SPINNER[spinnerFrame % SPINNER.length] : "○"}
+            </text>
             <text style={{ fg: active ? "#FFA500" : highlighted ? "#00BFFF" : "#888888" }}>
               {s.name}
             </text>

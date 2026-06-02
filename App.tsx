@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { createCliRenderer, LayoutEvents, type BoxRenderable } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import { xtermColor, cellAttrs, DEFAULT_FG, DEFAULT_BG } from "./src/colors"
-import { ptySessions, spawnSession, killSession, pinnedToBottom } from "./src/pty"
+import { ptySessions, spawnSession, killSession, pinnedToBottom, activity } from "./src/pty"
 import type { Mode, Session } from "./src/types"
 import { SessionList } from "./src/components/SessionList"
 import { TerminalView } from "./src/components/TerminalView"
@@ -35,6 +35,7 @@ function App() {
   const [renameInput, setRenameInput] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const [searching, setSearching] = useState(false)
+  const [spinnerFrame, setSpinnerFrame] = useState(0)
 
   const termBoxRef = useRef<BoxRenderable | null>(null)
   const spawnedIds = useRef(new Set<number>())
@@ -56,6 +57,18 @@ function App() {
   useEffect(() => { renameInputRef.current = renameInput }, [renameInput])
   useEffect(() => { searchQueryRef.current = searchQuery }, [searchQuery])
   useEffect(() => { searchingRef.current = searching }, [searching])
+
+  // ── Spinner animation: tick only while some session is streaming ───────────
+
+  const anyActive = sessions.some(s => activity.get(s.id))
+  useEffect(() => {
+    if (!anyActive) return
+    const interval = setInterval(() => {
+      setSpinnerFrame(f => f + 1)
+      renderer.requestRender()
+    }, 80)
+    return () => clearInterval(interval)
+  }, [anyActive])
 
   // ── Sync PTY dimensions with terminal box ──────────────────────────────────
 
@@ -289,6 +302,8 @@ function App() {
             renameInput={renameInput}
             searchQuery={searchQuery}
             searching={searching}
+            activeSessions={activity}
+            spinnerFrame={spinnerFrame}
           />
         </box>
       </box>

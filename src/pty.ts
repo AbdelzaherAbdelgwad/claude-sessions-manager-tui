@@ -5,6 +5,12 @@ const { Terminal: XTerm } = XTermPkg as any
 
 export const ptySessions = new Map<number, PtySession>()
 export const pinnedToBottom = new Set<number>()
+// True while a session's PTY is actively streaming output (Claude generating)
+export const activity = new Map<number, boolean>()
+const idleTimers = new Map<number, ReturnType<typeof setTimeout>>()
+
+// How long the output must stay quiet before a session is considered idle
+const IDLE_MS = 600
 
 export function spawnSession(id: number, cols: number, rows: number, onUpdate: () => void) {
   const xterm = new XTerm({ cols, rows, allowProposedApi: true })
@@ -15,6 +21,14 @@ export function spawnSession(id: number, cols: number, rows: number, onUpdate: (
       xterm.write(data, () => {
         session.hasData = true
         if (pinnedToBottom.has(id)) xterm.scrollToBottom()
+        // Mark active only on the rising edge so React re-renders once, not per byte
+        if (!activity.get(id)) { activity.set(id, true); onUpdate() }
+        clearTimeout(idleTimers.get(id))
+        idleTimers.set(id, setTimeout(() => {
+          activity.set(id, false)
+          idleTimers.delete(id)
+          onUpdate()
+        }, IDLE_MS))
         onUpdate()
       })
     },
@@ -32,4 +46,7 @@ export function killSession(id: number) {
   try { s.xterm.dispose() } catch { }
   ptySessions.delete(id)
   pinnedToBottom.delete(id)
+  clearTimeout(idleTimers.get(id))
+  idleTimers.delete(id)
+  activity.delete(id)
 }
