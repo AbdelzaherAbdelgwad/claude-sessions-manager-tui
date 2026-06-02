@@ -11,6 +11,14 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 
 ## Install
 
+**One-liner:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AbdelzaherAbdelgwad/claude-sessions-manager-tui/master/install.sh | bash
+```
+
+**Manual:**
+
 ```bash
 git clone https://github.com/AbdelzaherAbdelgwad/claude-sessions-manager-tui.git
 cd claude-sessions-manager-tui
@@ -24,6 +32,14 @@ csm
 ```
 
 ## Uninstall
+
+**One-liner:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AbdelzaherAbdelgwad/claude-sessions-manager-tui/master/uninstall.sh | bash
+```
+
+**Manual:**
 
 ```bash
 cd claude-sessions-manager-tui
