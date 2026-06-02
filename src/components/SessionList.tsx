@@ -12,29 +12,43 @@ interface Props {
 
 export function SessionList({ sessions, activeId, highlightedIdx, isInsert, onSelect, onDelete, onAdd }: Props) {
   return (
-    <box title="Sessions" style={{ width: "20%", height: "100%", border: true, borderStyle: "rounded", borderColor: "#FFA500", padding: 1, flexDirection: "column" }}>
-      <scrollbox style={{ width: "100%", flexGrow: 1, scrollY: true }}>
-        {sessions.map((s, i) => {
-          const active = s.id === activeId
-          const highlighted = i === highlightedIdx && !isInsert
-          return (
-            <box
-              key={s.id}
-              onMouseDown={() => onSelect(s, i)}
-              style={{ width: "100%", paddingX: 1, flexDirection: "row", backgroundColor: highlighted ? "#1a1a2e" : active ? "#2a2a2a" : undefined, border: true, borderStyle: "rounded", borderColor: highlighted ? "#00BFFF" : active ? "#FFA500" : "#333333" }}
-            >
-              <text style={{ fg: "#555555", marginRight: 1 }}>{highlighted ? ">" : active ? "●" : " "}</text>
-              <text style={{ flexGrow: 1, fg: highlighted ? "#00BFFF" : active ? "#FFA500" : "#888888" }}>{s.name}</text>
-              {sessions.length > 1 && (
-                <text onMouseDown={e => { e.stopPropagation(); onDelete(s.id) }} style={{ fg: "#555555" }}>✕</text>
-              )}
-            </box>
-          )
-        })}
-        <box onMouseDown={onAdd} style={{ width: "100%", padding: 1 }}>
-          <text style={{ fg: "#555555" }}>+ New  (n)</text>
-        </box>
-      </scrollbox>
+    <box style={{ width: "100%", height: "100%", flexDirection: "row", paddingY: 0, gap: 1 }}>
+      {sessions.map((s, i) => {
+        const active = s.id === activeId
+        const highlighted = i === highlightedIdx && !isInsert
+        return (
+          <box
+            key={s.id}
+            onMouseDown={() => onSelect(s, i)}
+            style={{
+              flexDirection: "row",
+              paddingX: 2,
+              paddingY: 0,
+              height: "100%",
+              margin: 0,
+              border: true,
+              borderStyle: "rounded",
+              borderColor: active ? "#FFA500" : highlighted ? "#00BFFF" : "#333333",
+              backgroundColor: active ? "#1a1a2e" : highlighted ? "#252525" : undefined,
+            }}
+          >
+            <text style={{ fg: active ? "#FFA500" : highlighted ? "#00BFFF" : "#888888" }}>
+              {s.name}
+            </text>
+            {sessions.length > 1 && (
+              <text
+                onMouseDown={e => { e.stopPropagation(); onDelete(s.id) }}
+                style={{ fg: "#555555", marginLeft: 1 }}
+              >
+                ✕
+              </text>
+            )}
+          </box>
+        )
+      })}
+      <box onMouseDown={onAdd} style={{ paddingX: 1, border: true, borderStyle: "rounded", borderColor: "#333333", flexDirection: "row" }}>
+        <text style={{ fg: "#555555" }}>+</text>
+      </box>
     </box>
   )
 }

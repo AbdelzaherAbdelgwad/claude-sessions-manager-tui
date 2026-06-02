@@ -21,6 +21,7 @@ function App() {
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null)
   const [mouseEnabled, setMouseEnabled] = useState(true)
   const [showHelp, setShowHelp] = useState(false)
+  const [, setTerminalUpdate] = useState(0)
 
   const termBoxRef = useRef<BoxRenderable | null>(null)
   const spawnedIds = useRef(new Set<number>())
@@ -43,7 +44,10 @@ function App() {
     if (!existing) {
       if (!spawnedIds.current.has(id)) {
         spawnedIds.current.add(id)
-        spawnSession(id, w, h, () => renderer.requestRender())
+        spawnSession(id, w, h, () => {
+          setTerminalUpdate(n => n + 1)
+          renderer.requestRender()
+        })
       }
     } else if (w !== existing.xterm.cols || h !== existing.xterm.rows) {
       existing.xterm.resize(w, h)
@@ -160,14 +164,15 @@ function App() {
 
       if (mode === "normal") {
         const len = sessionsRef.current.length
-        if (seq === "j" || seq === "\x1b[B") { setHighlightedIdx(i => Math.min(i + 1, len - 1)); return true }
-        if (seq === "k" || seq === "\x1b[A") { setHighlightedIdx(i => Math.max(i - 1, 0)); return true }
-        if (seq === "\r" || seq === "l") { openSession(highlightedIdxRef.current); return true }
+        if (seq === "l" || seq === "\x1b[C") { setHighlightedIdx(i => Math.min(i + 1, len - 1)); return true }
+        if (seq === "h" || seq === "\x1b[D") { setHighlightedIdx(i => Math.max(i - 1, 0)); return true }
+        if (seq === "\r" || seq === " ") { openSession(highlightedIdxRef.current); return true }
         if (seq === "i" || seq === "a") { setMode("insert"); return true }
         if (seq === "n") { addSession(); return true }
         if (seq === "d") { setDeleteConfirm(sessionsRef.current[highlightedIdxRef.current]?.id ?? null); return true }
         if (seq === "m") { const next = !renderer.useMouse; renderer.useMouse = next; setMouseEnabled(next); return true }
         if (seq === "?") { setShowHelp(v => !v); return true }
+        if ("123456789".includes(seq)) { const idx = parseInt(seq) - 1; if (idx < len) { setHighlightedIdx(idx); openSession(idx); } return true }
         if (seq === "\x1b") { ptySessions.get(activeIdRef.current)?.pty.write(seq); return true }
         if (seq.startsWith("\x1b[")) { ptySessions.get(activeIdRef.current)?.pty.write(seq); return true }
         return false
@@ -179,7 +184,7 @@ function App() {
         return true
       }
 
-return false
+      return false
     }
     renderer.prependInputHandler(handler)
     return () => renderer.removeInputHandler(handler)
@@ -205,8 +210,7 @@ return false
 
   return (
     <box style={{ flexDirection: "column", width: "100%", height: "100%" }}>
-      <box style={{ flexDirection: "row", flexGrow: 1 }}>
-
+      <box style={{ flexGrow: 1, height: "7%", flexDirection: "column" }}>
         <SessionList
           sessions={sessions}
           activeId={activeId}
@@ -216,16 +220,15 @@ return false
           onDelete={id => setDeleteConfirm(id)}
           onAdd={addSession}
         />
+      </box>
 
-        <box style={{ flexGrow: 1, height: "100%", flexDirection: "column", paddingLeft: 1 }}>
-          <TerminalView
-            title={activeName}
-            mouseEnabled={mouseEnabled}
-            termBoxRef={termBoxRef}
-            onMouseDown={() => setMode("insert")}
-          />
-        </box>
-
+      <box style={{ flexGrow: 1, height: "93%", flexDirection: "column" }}>
+        <TerminalView
+          title={activeName}
+          mouseEnabled={mouseEnabled}
+          termBoxRef={termBoxRef}
+          onMouseDown={() => setMode("insert")}
+        />
       </box>
 
       <StatusBar mode={mode} activeName={activeName} isAltScreen={isAltScreen} />
