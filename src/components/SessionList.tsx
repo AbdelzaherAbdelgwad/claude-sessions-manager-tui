@@ -8,9 +8,13 @@ interface Props {
   onSelect: (session: Session, index: number) => void
   onDelete: (id: number) => void
   onAdd: () => void
+  renaming?: number | null
+  renameInput?: string
+  searchQuery?: string
+  searching?: boolean
 }
 
-export function SessionList({ sessions, activeId, highlightedIdx, isInsert, onSelect, onDelete, onAdd }: Props) {
+export function SessionList({ sessions, activeId, highlightedIdx, isInsert, onSelect, onDelete, onAdd, renaming, renameInput, searchQuery, searching }: Props) {
   return (
     <box style={{ width: "100%", height: "100%", flexDirection: "row", paddingY: 0, gap: 1 }}>
       {sessions.map((s, i) => {

@@ -9,6 +9,8 @@ import { TerminalView } from "./src/components/TerminalView"
 import { StatusBar } from "./src/components/StatusBar"
 import { DeleteConfirmModal } from "./src/components/DeleteConfirmModal"
 import { HelpModal } from "./src/components/HelpModal"
+import { SearchModal } from "./src/components/SearchModal"
+import { RenameModal } from "./src/components/RenameModal"
 
 const renderer = await createCliRenderer({ useMouse: true })
 let sessionCounter = 1
@@ -22,6 +24,10 @@ function App() {
   const [mouseEnabled, setMouseEnabled] = useState(true)
   const [showHelp, setShowHelp] = useState(false)
   const [, setTerminalUpdate] = useState(0)
+  const [renaming, setRenaming] = useState<number | null>(null)
+  const [renameInput, setRenameInput] = useState("")
+  const [searchQuery, setSearchQuery] = useState("")
+  const [searching, setSearching] = useState(false)
 
   const termBoxRef = useRef<BoxRenderable | null>(null)
   const spawnedIds = useRef(new Set<number>())
@@ -30,11 +36,19 @@ function App() {
   const sessionsRef = useRef(sessions)
   const highlightedIdxRef = useRef(0)
   const showHelpRef = useRef(false)
+  const renamingRef = useRef<number | null>(null)
+  const renameInputRef = useRef("")
+  const searchQueryRef = useRef("")
+  const searchingRef = useRef(false)
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
   useEffect(() => { modeRef.current = mode }, [mode])
   useEffect(() => { sessionsRef.current = sessions }, [sessions])
   useEffect(() => { highlightedIdxRef.current = highlightedIdx }, [highlightedIdx])
   useEffect(() => { showHelpRef.current = showHelp }, [showHelp])
+  useEffect(() => { renamingRef.current = renaming }, [renaming])
+  useEffect(() => { renameInputRef.current = renameInput }, [renameInput])
+  useEffect(() => { searchQueryRef.current = searchQuery }, [searchQuery])
+  useEffect(() => { searchingRef.current = searching }, [searching])
 
   // ── Sync PTY dimensions with terminal box ──────────────────────────────────
 
@@ -160,6 +174,27 @@ function App() {
       if (seq === "\x1b[1;5A") { scroll(-3, seq); return true }
       if (seq === "\x1b[1;5B") { scroll(3, seq); return true }
 
+      if (renamingRef.current !== null) {
+        if (seq === "\r") {
+          setSessions(prev => prev.map(s => s.id === renamingRef.current ? { ...s, name: renameInputRef.current } : s))
+          setRenaming(null)
+          setRenameInput("")
+          return true
+        }
+        if (seq === "\x1b") { setRenaming(null); setRenameInput(""); return true }
+        if (seq === "\x7f" || seq === "\b") { setRenameInput(s => s.slice(0, -1)); return true }
+        if (seq.length === 1 && seq.charCodeAt(0) >= 32) { setRenameInput(s => s + seq); return true }
+        return true
+      }
+
+      if (searchingRef.current) {
+        if (seq === "\r") { setSearching(false); return true }
+        if (seq === "\x1b") { setSearching(false); return true }
+        if (seq === "\x7f" || seq === "\b") { setSearchQuery(s => s.slice(0, -1)); return true }
+        if (seq.length === 1 && seq.charCodeAt(0) >= 32) { setSearchQuery(s => s + seq); return true }
+        return true
+      }
+
       const mode = modeRef.current
 
       if (mode === "normal") {
@@ -168,6 +203,8 @@ function App() {
         if (seq === "h" || seq === "\x1b[D") { setHighlightedIdx(i => Math.max(i - 1, 0)); return true }
         if (seq === "\r" || seq === " ") { openSession(highlightedIdxRef.current); return true }
         if (seq === "i" || seq === "a") { setMode("insert"); return true }
+        if (seq === "r") { const s = sessionsRef.current[highlightedIdxRef.current]; if (s) { setRenaming(s.id); setRenameInput(s.name); } return true }
+        if (seq === "/") { setSearching(true); setSearchQuery(""); return true }
         if (seq === "n") { addSession(); return true }
         if (seq === "d") { setDeleteConfirm(sessionsRef.current[highlightedIdxRef.current]?.id ?? null); return true }
         if (seq === "m") { const next = !renderer.useMouse; renderer.useMouse = next; setMouseEnabled(next); return true }
@@ -210,16 +247,32 @@ function App() {
 
   return (
     <box style={{ flexDirection: "column", width: "100%", height: "100%" }}>
-      <box style={{ flexGrow: 1, height: "7%", flexDirection: "column" }}>
-        <SessionList
-          sessions={sessions}
-          activeId={activeId}
-          highlightedIdx={highlightedIdx}
-          isInsert={isInsert}
-          onSelect={(s, i) => { setActiveId(s.id); setHighlightedIdx(i); setMode("insert"); activeIdRef.current = s.id }}
-          onDelete={id => setDeleteConfirm(id)}
-          onAdd={addSession}
-        />
+      <box style={{ flexGrow: 1, height: "7%", flexDirection: "row", gap: 1, paddingX: 1 }}>
+        {searchQuery && (
+          <>
+            <box style={{ paddingX: 1, border: true, borderStyle: "rounded", borderColor: "#00BFFF", height: "100%", flexDirection: "row" }}>
+              <text style={{ fg: "#00BFFF" }}>/{searchQuery}</text>
+            </box>
+            <box onMouseDown={() => { setSearching(false); setSearchQuery(""); }} style={{ paddingX: 1, border: true, borderStyle: "rounded", borderColor: "#FF6B6B", height: "100%", flexDirection: "row" }}>
+              <text style={{ fg: "#FF6B6B" }}>✕ Cancel</text>
+            </box>
+          </>
+        )}
+        <box style={{ flexGrow: 1, height: "100%" }}>
+          <SessionList
+            sessions={searching || searchQuery ? sessions.filter(s => s.name.toLowerCase().includes(searchQuery.toLowerCase())) : sessions}
+            activeId={activeId}
+            highlightedIdx={highlightedIdx}
+            isInsert={isInsert}
+            onSelect={(s, i) => { setActiveId(s.id); setHighlightedIdx(i); setMode("insert"); activeIdRef.current = s.id }}
+            onDelete={id => setDeleteConfirm(id)}
+            onAdd={addSession}
+            renaming={renaming}
+            renameInput={renameInput}
+            searchQuery={searchQuery}
+            searching={searching}
+          />
+        </box>
       </box>
 
       <box style={{ flexGrow: 1, height: "93%", flexDirection: "column" }}>
@@ -242,6 +295,10 @@ function App() {
       )}
 
       {showHelp && <HelpModal />}
+
+      {searching && <SearchModal query={searchQuery} onQueryChange={setSearchQuery} />}
+
+      {renaming !== null && <RenameModal input={renameInput} onInputChange={setRenameInput} />}
     </box>
   )
 }
