@@ -13,6 +13,13 @@ import { SearchModal } from "./src/components/SearchModal"
 import { RenameModal } from "./src/components/RenameModal"
 
 const renderer = await createCliRenderer({ useMouse: true })
+
+// Stable sort: favorites first, original order preserved within each group
+const sortByFavorite = (list: Session[]): Session[] =>
+  list
+    .map((s, i) => [s, i] as const)
+    .sort((a, b) => ((b[0].favorite ? 1 : 0) - (a[0].favorite ? 1 : 0)) || (a[1] - b[1]))
+    .map(([s]) => s)
 let sessionCounter = 1
 
 function App() {
@@ -135,12 +142,22 @@ function App() {
   const addSession = () => {
     const id = Date.now()
     setSessions(prev => {
-      const next = [...prev, { id, name: `Session ${++sessionCounter}` }]
-      setHighlightedIdx(next.length - 1)
+      const next = sortByFavorite([...prev, { id, name: `Session ${++sessionCounter}` }])
+      setHighlightedIdx(next.findIndex(s => s.id === id))
       return next
     })
     setActiveId(id)
     setMode("insert")
+  }
+
+  const toggleFavorite = (id: number) => {
+    setSessions(prev => {
+      const sorted = sortByFavorite(prev.map(s => s.id === id ? { ...s, favorite: !s.favorite } : s))
+      // keep the highlight on the session that was just toggled
+      const newIdx = sorted.findIndex(s => s.id === id)
+      if (newIdx >= 0) setHighlightedIdx(newIdx)
+      return sorted
+    })
   }
 
   const doDelete = (id: number) => {
@@ -204,6 +221,7 @@ function App() {
         if (seq === "\r" || seq === " ") { openSession(highlightedIdxRef.current); return true }
         if (seq === "i" || seq === "a") { setMode("insert"); return true }
         if (seq === "r") { const s = sessionsRef.current[highlightedIdxRef.current]; if (s) { setRenaming(s.id); setRenameInput(s.name); } return true }
+        if (seq === "*") { const s = sessionsRef.current[highlightedIdxRef.current]; if (s) toggleFavorite(s.id); return true }
         if (seq === "/") { setSearching(true); setSearchQuery(""); return true }
         if (seq === "n") { addSession(); return true }
         if (seq === "d") { setDeleteConfirm(sessionsRef.current[highlightedIdxRef.current]?.id ?? null); return true }
@@ -289,6 +307,7 @@ function App() {
       {deleteConfirm !== null && (
         <DeleteConfirmModal
           sessionName={sessions.find(s => s.id === deleteConfirm)?.name ?? ""}
+          isFavorite={!!sessions.find(s => s.id === deleteConfirm)?.favorite}
           onConfirm={() => doDelete(deleteConfirm)}
           onCancel={() => setDeleteConfirm(null)}
         />

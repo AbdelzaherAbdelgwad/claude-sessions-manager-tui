@@ -5,6 +5,7 @@ const HELP_LINES = [
   ["Enter / Space", "open session + insert mode"],
   ["i / a", "enter insert mode"],
   ["r", "rename session"],
+  ["*", "star/unstar session (sorts to front)"],
   ["/", "search sessions"],
   ["Esc", "normal mode / forward to Claude"],
   ["n", "new session"],

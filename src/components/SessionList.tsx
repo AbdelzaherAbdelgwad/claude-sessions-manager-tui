@@ -36,6 +36,9 @@ export function SessionList({ sessions, activeId, highlightedIdx, isInsert, onSe
               backgroundColor: active ? "#1a1a2e" : highlighted ? "#252525" : undefined,
             }}
           >
+            {s.favorite && (
+              <text style={{ fg: "#FFD700", marginRight: 1 }}>★</text>
+            )}
             <text style={{ fg: active ? "#FFA500" : highlighted ? "#00BFFF" : "#888888" }}>
               {s.name}
             </text>
