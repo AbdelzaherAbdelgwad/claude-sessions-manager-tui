@@ -11,6 +11,7 @@ import { DeleteConfirmModal } from "./src/components/DeleteConfirmModal"
 import { HelpModal } from "./src/components/HelpModal"
 import { SearchModal } from "./src/components/SearchModal"
 import { RenameModal } from "./src/components/RenameModal"
+import { QuitConfirmModal } from "./src/components/QuitConfirmModal"
 
 const renderer = await createCliRenderer({ useMouse: true })
 
@@ -36,6 +37,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searching, setSearching] = useState(false)
   const [spinnerFrame, setSpinnerFrame] = useState(0)
+  const [quitConfirm, setQuitConfirm] = useState(false)
 
   const termBoxRef = useRef<BoxRenderable | null>(null)
   const spawnedIds = useRef(new Set<number>())
@@ -188,7 +190,7 @@ function App() {
 
   useEffect(() => {
     const handler = (seq: string) => {
-      if (seq === "\x04") { renderer.destroy(); process.exit(0) }
+      if (seq === "\x04") { setQuitConfirm(true); return true }
       if (showHelpRef.current && seq === "\x1b") { setShowHelp(false); return true }
       if (seq === "\x03") { setDeleteConfirm(activeIdRef.current); return true }
 
@@ -267,6 +269,17 @@ function App() {
     return () => renderer.removeInputHandler(handler)
   }, [deleteConfirm])
 
+  useEffect(() => {
+    if (!quitConfirm) return
+    const handler = (seq: string) => {
+      if (seq === "y" || seq === "\r") { renderer.destroy(); process.exit(0) }
+      if (seq === "n" || seq === "\x1b") { setQuitConfirm(false); return true }
+      return true
+    }
+    renderer.prependInputHandler(handler)
+    return () => renderer.removeInputHandler(handler)
+  }, [quitConfirm])
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   const activeName = sessions.find(s => s.id === activeId)?.name ?? ""
@@ -331,6 +344,14 @@ function App() {
       {searching && <SearchModal query={searchQuery} onQueryChange={setSearchQuery} />}
 
       {renaming !== null && <RenameModal input={renameInput} onInputChange={setRenameInput} />}
+
+      {quitConfirm && (
+        <QuitConfirmModal
+          sessionCount={sessions.length}
+          onConfirm={() => { renderer.destroy(); process.exit(0) }}
+          onCancel={() => setQuitConfirm(false)}
+        />
+      )}
     </box>
   )
 }
