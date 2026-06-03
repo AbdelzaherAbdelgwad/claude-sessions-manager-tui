@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { createCliRenderer, LayoutEvents, type BoxRenderable } from "@opentui/core"
 import { createRoot } from "@opentui/react"
-import { xtermColor, cellAttrs, DEFAULT_FG, DEFAULT_BG } from "./src/colors"
+import { paintXterm } from "./src/render"
 import { ptySessions, spawnSession, killSession, pinnedToBottom, activity } from "./src/pty"
 import type { Mode, Session } from "./src/types"
 import { SessionList } from "./src/components/SessionList"
@@ -121,27 +121,7 @@ function App() {
     const box = termBoxRef.current
     if (!box) return
 
-    box.renderAfter = function (buffer) {
-      const s = ptySessions.get(activeId)
-      if (!s) return
-      const w = this.width, h = this.height, sx = this.screenX, sy = this.screenY
-      buffer.pushScissorRect(sx, sy, w, h)
-      const buf = s.xterm.buffer.active
-      const viewportY = buf.viewportY
-      for (let row = 0; row < Math.min(h, s.xterm.rows); row++) {
-        const line = buf.getLine(viewportY + row)
-        if (!line) continue
-        for (let col = 0; col < Math.min(w, s.xterm.cols); col++) {
-          const cell = line.getCell(col)
-          if (!cell) continue
-          const char = cell.getChars() || " "
-          const fg = xtermColor(cell.getFgColorMode(), cell.getFgColor(), DEFAULT_FG)
-          const bg = xtermColor(cell.getBgColorMode(), cell.getBgColor(), DEFAULT_BG)
-          buffer.setCell(sx + col, sy + row, char, fg, bg, cellAttrs(cell))
-        }
-      }
-      buffer.popScissorRect()
-    }
+    box.renderAfter = (buffer) => paintXterm(buffer, box, ptySessions.get(activeId)?.xterm)
 
     const onResized = () => syncSession(activeId, box.width, box.height)
     box.on(LayoutEvents.RESIZED, onResized)

@@ -1,6 +1,6 @@
 {
-  "name": "claude-agents",
-  "module": "index.ts",
+  "name": "claude-sessions-manager-tui",
+  "module": "App.tsx",
   "type": "module",
   "private": true,
   "scripts": {
@@ -15,7 +15,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.100.1",
     "@opentui/core": "^0.3.1",
     "@opentui/react": "^0.3.1",
     "@xterm/headless": "^6.0.0",
