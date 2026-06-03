@@ -120,12 +120,6 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 | `y` | Copy session buffer to clipboard (OSC 52) |
 | `m` | Toggle mouse off → use terminal's native text selection to copy |
 
-### Answering Claude Prompts
-
-| Key | Action |
-|-----|--------|
-| `Alt+1` – `Alt+5` | Answer Claude's permission prompts (works in any mode) |
-
 ### Other
 
 | Key | Action |
