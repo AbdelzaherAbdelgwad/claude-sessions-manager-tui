@@ -12,6 +12,8 @@ import { HelpModal } from "./src/components/HelpModal"
 import { SearchModal } from "./src/components/SearchModal"
 import { RenameModal } from "./src/components/RenameModal"
 import { QuitConfirmModal } from "./src/components/QuitConfirmModal"
+import { StartupModal } from "./src/components/StartupModal"
+import { loadState, saveState } from "./src/persistence"
 
 const renderer = await createCliRenderer({ useMouse: true })
 
@@ -21,11 +23,18 @@ const sortByFavorite = (list: Session[]): Session[] =>
     .map((s, i) => [s, i] as const)
     .sort((a, b) => ((b[0].favorite ? 1 : 0) - (a[0].favorite ? 1 : 0)) || (a[1] - b[1]))
     .map(([s]) => s)
-let sessionCounter = 1
+
+// Restore persisted tabs before the first render
+const initialState = await loadState()
+// Continue the "Session N" numbering past any restored auto-named sessions
+let sessionCounter = initialState.sessions.reduce((max, s) => {
+  const m = s.name.match(/^Session (\d+)$/)
+  return m ? Math.max(max, parseInt(m[1])) : max
+}, 0) || initialState.sessions.length
 
 function App() {
-  const [sessions, setSessions] = useState<Session[]>([{ id: 1, name: "Session 1" }])
-  const [activeId, setActiveId] = useState(1)
+  const [sessions, setSessions] = useState<Session[]>(initialState.sessions)
+  const [activeId, setActiveId] = useState(initialState.activeId)
   const [highlightedIdx, setHighlightedIdx] = useState(0)
   const [mode, setMode] = useState<Mode>("normal")
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null)
@@ -38,6 +47,8 @@ function App() {
   const [searching, setSearching] = useState(false)
   const [spinnerFrame, setSpinnerFrame] = useState(0)
   const [quitConfirm, setQuitConfirm] = useState(false)
+  // Show the resume/start-new chooser only when valid saved state exists
+  const [showStartup, setShowStartup] = useState(initialState.restored)
 
   const termBoxRef = useRef<BoxRenderable | null>(null)
   const spawnedIds = useRef(new Set<number>())
@@ -50,6 +61,8 @@ function App() {
   const renameInputRef = useRef("")
   const searchQueryRef = useRef("")
   const searchingRef = useRef(false)
+  const showStartupRef = useRef(initialState.restored)
+  useEffect(() => { showStartupRef.current = showStartup }, [showStartup])
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
   useEffect(() => { modeRef.current = mode }, [mode])
   useEffect(() => { sessionsRef.current = sessions }, [sessions])
@@ -72,10 +85,19 @@ function App() {
     return () => clearInterval(interval)
   }, [anyActive])
 
+  // ── Persist tabs (debounced) ───────────────────────────────────────────────
+
+  useEffect(() => {
+    const t = setTimeout(() => { saveState(sessions, activeId) }, 300)
+    return () => clearTimeout(t)
+  }, [sessions, activeId])
+
   // ── Sync PTY dimensions with terminal box ──────────────────────────────────
 
   const syncSession = useCallback((id: number, w: number, h: number) => {
     if (w <= 0 || h <= 0) return
+    // Don't spawn anything until the startup chooser is dismissed
+    if (showStartupRef.current) return
     const existing = ptySessions.get(id)
     if (!existing) {
       if (!spawnedIds.current.has(id)) {
@@ -124,7 +146,7 @@ function App() {
     if (box.width > 0 && box.height > 0) syncSession(activeId, box.width, box.height)
     renderer.requestRender()
     return () => { box.off(LayoutEvents.RESIZED, onResized) }
-  }, [activeId, syncSession])
+  }, [activeId, syncSession, showStartup])
 
   // ── Scroll + clipboard ─────────────────────────────────────────────────────
 
@@ -143,6 +165,19 @@ function App() {
     if (atBottom) pinnedToBottom.add(id)
     else pinnedToBottom.delete(id)
     renderer.requestRender()
+  }
+
+  // ── Startup chooser ────────────────────────────────────────────────────────
+
+  const resumePrevious = () => setShowStartup(false)
+
+  const startNew = () => {
+    sessionCounter = 1
+    const id = Date.now()
+    setSessions([{ id, name: "Session 1" }])
+    setActiveId(id)
+    setHighlightedIdx(0)
+    setShowStartup(false)
   }
 
   // ── Session lifecycle ──────────────────────────────────────────────────────
@@ -259,6 +294,17 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!showStartup) return
+    const handler = (seq: string) => {
+      if (seq === "r" || seq === "\r") { resumePrevious(); return true }
+      if (seq === "n" || seq === "\x1b") { startNew(); return true }
+      return true
+    }
+    renderer.prependInputHandler(handler)
+    return () => renderer.removeInputHandler(handler)
+  }, [showStartup])
+
+  useEffect(() => {
     if (deleteConfirm === null) return
     const handler = (seq: string) => {
       if (seq === "y" || seq === "\r") { doDelete(deleteConfirm); return true }
@@ -272,13 +318,19 @@ function App() {
   useEffect(() => {
     if (!quitConfirm) return
     const handler = (seq: string) => {
-      if (seq === "y" || seq === "\r") { renderer.destroy(); process.exit(0) }
+      if (seq === "y" || seq === "\r") { quit(); return true }
       if (seq === "n" || seq === "\x1b") { setQuitConfirm(false); return true }
       return true
     }
     renderer.prependInputHandler(handler)
     return () => renderer.removeInputHandler(handler)
   }, [quitConfirm])
+
+  const quit = async () => {
+    await saveState(sessionsRef.current, activeIdRef.current)
+    renderer.destroy()
+    process.exit(0)
+  }
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -348,8 +400,16 @@ function App() {
       {quitConfirm && (
         <QuitConfirmModal
           sessionCount={sessions.length}
-          onConfirm={() => { renderer.destroy(); process.exit(0) }}
+          onConfirm={quit}
           onCancel={() => setQuitConfirm(false)}
+        />
+      )}
+
+      {showStartup && (
+        <StartupModal
+          sessionCount={sessions.length}
+          onResume={resumePrevious}
+          onStartNew={startNew}
         />
       )}
     </box>
