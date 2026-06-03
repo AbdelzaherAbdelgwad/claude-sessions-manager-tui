@@ -4,6 +4,18 @@ A terminal UI for running multiple Claude Code sessions simultaneously, built wi
 
 Each session is an independent `claude` process running in a PTY, so conversation history is maintained naturally within each session.
 
+## Features
+
+- **Multiple Claude sessions** as browser-style tabs in a top bar
+- **Per-session activity indicator** — animated spinner while Claude is generating, dim dot when idle
+- **Favorites** — star sessions (`*`); they sort to the front
+- **Rename** sessions (`r`) and **search/filter** them (`/`) via modals
+- **Session persistence** — tabs (names, favorites, order) are saved and restored
+- **Conversation resume** — restored tabs reopen the actual Claude conversation (`claude --resume`)
+- **Startup chooser** — on launch, Resume previous or Start new
+- **Confirm-on-quit** — Ctrl+D prompts before closing all sessions
+- **Direct passthrough** — in INSERT mode, all keys (including `/commands`, arrows, Tab) go straight to Claude Code
+
 ## Requirements
 
 - [Bun](https://bun.com) v1.3+
@@ -70,12 +82,27 @@ bun App.tsx
 | `Ctrl+C` | Delete active session (with confirmation) |
 | `Ctrl+D` | Quit |
 
+### Session management (NORMAL mode)
+
+| Key | Action |
+|-----|--------|
+| `1` – `9` | Jump to session N |
+| `r` | Rename session |
+| `*` | Star / unstar session (sorts to front) |
+| `/` | Search / filter sessions |
+
+### INSERT mode
+
+| Key | Action |
+|-----|--------|
+| any key | Forwarded directly to Claude Code (`/commands`, arrows, Tab) |
+| `Esc` | Back to NORMAL mode |
+
 ### Scrolling (any mode)
 
 | Key | Action |
 |-----|--------|
-| `PageUp` / `PageDown` | Scroll terminal 10 lines |
-| `Ctrl+↑` / `Ctrl+↓` | Scroll terminal 3 lines |
+| `PageUp` / `PageDown` or `Ctrl+↑` / `Ctrl+↓` | Scroll terminal |
 
 ### Clipboard & Selection
 
@@ -113,3 +140,14 @@ bun App.tsx
 ## Mouse Support
 
 Mouse is enabled by default for clicking sessions and buttons. Press `m` to disable mouse (enters native terminal selection mode for copying text), press `m` again to re-enable.
+
+## Persistence
+
+State is saved to `~/.claude-sessions-manager/state.json` — tab names, favorites, order, the active tab, and each session's Claude conversation id.
+
+On launch, if saved sessions exist, a **Welcome back** chooser lets you:
+
+- **Resume previous** — restore your tabs and reopen each session's actual conversation via `claude --resume`
+- **Start new** — begin a single fresh session
+
+Quitting with `Ctrl+D` flushes the latest state before exit.

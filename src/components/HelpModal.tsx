@@ -11,6 +11,7 @@ const HELP_LINES = [
   ["n", "new session"],
   ["d", "delete session"],
   ["PgUp / PgDn", "scroll terminal"],
+  ["Ctrl+↑ / Ctrl+↓", "scroll terminal (page)"],
   ["Ctrl+C", "delete session (confirm)"],
   ["Ctrl+D", "quit"],
   ["m", "toggle mouse (off = native terminal select)"],

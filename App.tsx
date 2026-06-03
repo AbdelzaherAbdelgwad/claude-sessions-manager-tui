@@ -242,8 +242,8 @@ function App() {
 
       if (seq === "\x1b[5~") { scroll(-10, seq); return true }
       if (seq === "\x1b[6~") { scroll(10, seq); return true }
-      if (seq === "\x1b[1;5A") { scroll(-3, seq); return true }
-      if (seq === "\x1b[1;5B") { scroll(3, seq); return true }
+      if (seq === "\x1b[1;5A") { scroll(-10, "\x1b[5~"); return true }
+      if (seq === "\x1b[1;5B") { scroll(10, "\x1b[6~"); return true }
 
       if (renamingRef.current !== null) {
         if (seq === "\r") {
@@ -341,8 +341,6 @@ function App() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   const activeName = sessions.find(s => s.id === activeId)?.name ?? ""
-  const activeSession = ptySessions.get(activeId)
-  const isAltScreen = !activeSession?.hasData || (activeSession.xterm.buffer.active === activeSession.xterm.buffer.alternate)
   const isInsert = mode === "insert"
 
   return (
@@ -386,7 +384,7 @@ function App() {
         />
       </box>
 
-      <StatusBar mode={mode} activeName={activeName} isAltScreen={isAltScreen} />
+      <StatusBar mode={mode} activeName={activeName} />
 
       {deleteConfirm !== null && (
         <DeleteConfirmModal
