@@ -13,7 +13,7 @@ import { SearchModal } from "./src/components/SearchModal"
 import { RenameModal } from "./src/components/RenameModal"
 import { QuitConfirmModal } from "./src/components/QuitConfirmModal"
 import { StartupModal } from "./src/components/StartupModal"
-import { loadState, saveState } from "./src/persistence"
+import { loadState, saveState, freshSessionId } from "./src/persistence"
 
 const renderer = await createCliRenderer({ useMouse: true })
 
@@ -101,11 +101,13 @@ function App() {
     const existing = ptySessions.get(id)
     if (!existing) {
       if (!spawnedIds.current.has(id)) {
+        const session = sessionsRef.current.find(s => s.id === id)
+        if (!session) return
         spawnedIds.current.add(id)
         spawnSession(id, w, h, () => {
           setTerminalUpdate(n => n + 1)
           renderer.requestRender()
-        })
+        }, { claudeSessionId: session.claudeSessionId, cwd: session.cwd })
       }
     } else if (w !== existing.xterm.cols || h !== existing.xterm.rows) {
       existing.xterm.resize(w, h)
@@ -174,7 +176,7 @@ function App() {
   const startNew = () => {
     sessionCounter = 1
     const id = Date.now()
-    setSessions([{ id, name: "Session 1" }])
+    setSessions([{ id, name: "Session 1", claudeSessionId: freshSessionId(), cwd: process.cwd() }])
     setActiveId(id)
     setHighlightedIdx(0)
     setShowStartup(false)
@@ -191,7 +193,11 @@ function App() {
   const addSession = () => {
     const id = Date.now()
     setSessions(prev => {
-      const next = sortByFavorite([...prev, { id, name: `Session ${++sessionCounter}` }])
+      const taken = new Set(prev.map(s => s.claudeSessionId))
+      const next = sortByFavorite([
+        ...prev,
+        { id, name: `Session ${++sessionCounter}`, claudeSessionId: freshSessionId(taken), cwd: process.cwd() },
+      ])
       setHighlightedIdx(next.findIndex(s => s.id === id))
       return next
     })

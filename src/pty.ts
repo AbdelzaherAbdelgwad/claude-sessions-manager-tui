@@ -1,5 +1,6 @@
 import XTermPkg from "@xterm/headless"
 import type { PtySession } from "./types"
+import { conversationExists } from "./persistence"
 
 const { Terminal: XTerm } = XTermPkg as any
 
@@ -12,7 +13,12 @@ const idleTimers = new Map<number, ReturnType<typeof setTimeout>>()
 // How long the output must stay quiet before a session is considered idle
 const IDLE_MS = 600
 
-export function spawnSession(id: number, cols: number, rows: number, onUpdate: () => void) {
+interface SpawnOpts {
+  claudeSessionId: string
+  cwd: string
+}
+
+export function spawnSession(id: number, cols: number, rows: number, onUpdate: () => void, opts: SpawnOpts) {
   const xterm = new XTerm({ cols, rows, allowProposedApi: true })
   pinnedToBottom.add(id)
   const pty = new Bun.Terminal({
@@ -33,7 +39,14 @@ export function spawnSession(id: number, cols: number, rows: number, onUpdate: (
       })
     },
   })
-  const proc = Bun.spawn(["claude", "--settings", '{"tui":"fullscreen"}'], { terminal: pty })
+  // Resume the conversation if it already exists; otherwise start it with our id
+  const idArgs = conversationExists(opts.claudeSessionId)
+    ? ["--resume", opts.claudeSessionId]
+    : ["--session-id", opts.claudeSessionId]
+  const proc = Bun.spawn(
+    ["claude", ...idArgs, "--settings", '{"tui":"fullscreen"}'],
+    { terminal: pty, cwd: opts.cwd },
+  )
   const session: PtySession = { xterm, pty, proc, hasData: false }
   ptySessions.set(id, session)
 }
