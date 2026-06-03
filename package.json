@@ -3,6 +3,10 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "start": "bun App.tsx",
+    "build": "bun build --compile --minify --sourcemap=none ./App.tsx --outfile dist/csm"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/react": "^19.2.15"

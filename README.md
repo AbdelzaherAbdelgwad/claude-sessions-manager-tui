@@ -18,8 +18,10 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 
 ## Requirements
 
-- [Bun](https://bun.com) v1.3+
 - [Claude Code](https://claude.ai/code) installed and authenticated (`claude` in PATH)
+- A modern terminal (truecolor + mouse support recommended)
+
+> The installed binary is fully self-contained (the Bun runtime is embedded) — Bun is only needed if you build from source. Prebuilt binaries are published for Linux (x86_64/aarch64) and macOS (x86_64/arm64) on each [release](https://github.com/AbdelzaherAbdelgwad/claude-sessions-manager-tui/releases).
 
 ## Install
 
@@ -29,12 +31,12 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 curl -fsSL https://raw.githubusercontent.com/AbdelzaherAbdelgwad/claude-sessions-manager-tui/master/install.sh | bash
 ```
 
-**Manual:**
+**Manual (download the binary directly):**
 
 ```bash
-git clone https://github.com/AbdelzaherAbdelgwad/claude-sessions-manager-tui.git
-cd claude-sessions-manager-tui
-./install.sh
+# pick the asset for your platform: csm-linux-x64 / csm-linux-arm64 / csm-macos-x64 / csm-macos-arm64
+curl -fsSL https://github.com/AbdelzaherAbdelgwad/claude-sessions-manager-tui/releases/latest/download/csm-linux-x64 -o ~/.local/bin/csm
+chmod +x ~/.local/bin/csm
 ```
 
 Then launch with:
@@ -54,8 +56,7 @@ curl -fsSL https://raw.githubusercontent.com/AbdelzaherAbdelgwad/claude-sessions
 **Manual:**
 
 ```bash
-cd claude-sessions-manager-tui
-./uninstall.sh
+rm -f ~/.local/bin/csm
 ```
 
 ## Development
@@ -66,6 +67,14 @@ cd claude-sessions-manager-tui
 bun install
 bun App.tsx
 ```
+
+Build a standalone binary for your platform:
+
+```bash
+bun run build      # → dist/csm
+```
+
+Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.g. `git tag v0.1.0 && git push origin v0.1.0`), which builds the per-platform binaries and attaches them to the release.
 
 ## Keybindings
 

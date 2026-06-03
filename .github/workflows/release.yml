@@ -1,0 +1,38 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # required to create the GitHub Release
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: bun-linux-x64
+            asset: csm-linux-x64
+          - os: ubuntu-24.04-arm
+            target: bun-linux-arm64
+            asset: csm-linux-arm64
+          - os: macos-13
+            target: bun-darwin-x64
+            asset: csm-macos-x64
+          - os: macos-14
+            target: bun-darwin-arm64
+            asset: csm-macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Compile standalone binary
+        run: bun build --compile --minify --sourcemap=none --target=${{ matrix.target }} ./App.tsx --outfile ${{ matrix.asset }}
+      - name: Publish to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.asset }}
