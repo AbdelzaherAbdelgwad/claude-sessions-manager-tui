@@ -17,11 +17,10 @@ arch="$(uname -m)"
 case "$os-$arch" in
   Linux-x86_64)  asset="csm-linux-x64" ;;
   Linux-aarch64) asset="csm-linux-arm64" ;;
-  Darwin-x86_64) asset="csm-macos-x64" ;;
   Darwin-arm64)  asset="csm-macos-arm64" ;;
   *)
     echo "✗ No prebuilt binary for: $os-$arch"
-    echo "  Supported: Linux (x86_64/aarch64), macOS (x86_64/arm64)."
+    echo "  Supported: Linux (x86_64/aarch64), macOS (Apple Silicon / arm64)."
     echo "  Build from source instead — see the Development section in the README."
     exit 1
     ;;

@@ -19,9 +19,6 @@ jobs:
           - os: ubuntu-24.04-arm
             target: bun-linux-arm64
             asset: csm-linux-arm64
-          - os: macos-13
-            target: bun-darwin-x64
-            asset: csm-macos-x64
           - os: macos-14
             target: bun-darwin-arm64
             asset: csm-macos-arm64
