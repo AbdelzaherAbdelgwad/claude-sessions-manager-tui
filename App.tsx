@@ -345,7 +345,7 @@ function App() {
 
   return (
     <box style={{ flexDirection: "column", width: "100%", height: "100%" }}>
-      <box style={{ flexGrow: 1, height: "7%", flexDirection: "row", gap: 1, paddingX: 1 }}>
+      <box style={{ height: 3, flexShrink: 0, flexDirection: "row", gap: 1, paddingX: 1 }}>
         {searchQuery && (
           <>
             <box style={{ paddingX: 1, border: true, borderStyle: "rounded", borderColor: "#00BFFF", height: "100%", flexDirection: "row" }}>
@@ -375,7 +375,7 @@ function App() {
         </box>
       </box>
 
-      <box style={{ flexGrow: 1, height: "93%", flexDirection: "column" }}>
+      <box style={{ flexGrow: 1, flexDirection: "column" }}>
         <TerminalView
           title={activeName}
           mouseEnabled={mouseEnabled}

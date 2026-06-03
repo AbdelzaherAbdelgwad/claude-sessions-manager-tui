@@ -20,7 +20,7 @@ const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", 
 
 export function SessionList({ sessions, activeId, highlightedIdx, isInsert, onSelect, onDelete, onAdd, renaming, renameInput, searchQuery, searching, activeSessions, spinnerFrame = 0 }: Props) {
   return (
-    <box style={{ width: "100%", height: "100%", flexDirection: "row", paddingY: 0, gap: 1 }}>
+    <box style={{ width: "100%", height: "100%", flexDirection: "row", paddingY: 0, gap: 1, overflow: "hidden" }}>
       {sessions.map((s, i) => {
         const active = s.id === activeId
         const highlighted = i === highlightedIdx && !isInsert
@@ -31,6 +31,7 @@ export function SessionList({ sessions, activeId, highlightedIdx, isInsert, onSe
             onMouseDown={() => onSelect(s, i)}
             style={{
               flexDirection: "row",
+              flexShrink: 0,
               paddingX: 2,
               paddingY: 0,
               height: "100%",
@@ -61,7 +62,7 @@ export function SessionList({ sessions, activeId, highlightedIdx, isInsert, onSe
           </box>
         )
       })}
-      <box onMouseDown={onAdd} style={{ paddingX: 1, border: true, borderStyle: "rounded", borderColor: "#333333", flexDirection: "row" }}>
+      <box onMouseDown={onAdd} style={{ paddingX: 1, flexShrink: 0, height: "100%", border: true, borderStyle: "rounded", borderColor: "#333333", flexDirection: "row" }}>
         <text style={{ fg: "#555555" }}>+</text>
       </box>
     </box>
