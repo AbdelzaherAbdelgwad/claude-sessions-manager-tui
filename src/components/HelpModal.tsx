@@ -10,6 +10,7 @@ const HELP_LINES = [
   ["/", "search sessions"],
   ["Esc", "normal mode / forward to Claude"],
   ["n", "new session"],
+  ["o", "open session from another project"],
   ["d", "delete session"],
   ["PgUp / PgDn", "scroll terminal"],
   ["Ctrl+↑ / Ctrl+↓", "scroll terminal (page)"],

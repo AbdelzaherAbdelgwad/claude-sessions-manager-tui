@@ -108,6 +108,20 @@ async function readProjects(): Promise<Record<string, ProjectState>> {
   return projects
 }
 
+// Serialize every read-modify-write of state.json: saveState and takeSession
+// both read + rewrite the whole file, and interleaved awaits could lose updates.
+let writeQueue: Promise<unknown> = Promise.resolve()
+function enqueue<T>(fn: () => Promise<T>): Promise<T> {
+  const run = writeQueue.then(fn, fn)
+  writeQueue = run.catch(() => {}) // a failed op must not wedge the chain
+  return run
+}
+
+async function writeProjects(projects: Record<string, ProjectState>): Promise<void> {
+  const state: PersistedState = { version: STATE_VERSION, projects }
+  await Bun.write(STATE_FILE, JSON.stringify(state, null, 2))
+}
+
 // Read persisted state for the current directory at startup.
 // Returns defaults (restored=false) if this directory has no saved sessions.
 export async function loadState(): Promise<LoadedState> {
@@ -121,11 +135,38 @@ export async function loadState(): Promise<LoadedState> {
 // Best-effort; failures are swallowed.
 export async function saveState(sessions: Session[], activeId: number): Promise<void> {
   try {
-    const projects = await readProjects()
-    projects[process.cwd()] = { activeId, sessions }
-    const state: PersistedState = { version: STATE_VERSION, projects }
-    await Bun.write(STATE_FILE, JSON.stringify(state, null, 2))
+    await enqueue(async () => {
+      const projects = await readProjects()
+      projects[process.cwd()] = { activeId, sessions }
+      await writeProjects(projects)
+    })
   } catch {
     // ignore — persistence is best-effort
   }
+}
+
+// Saved sessions of every project except the current one (for the picker).
+export async function loadOtherProjects(): Promise<Array<{ cwd: string; sessions: Session[] }>> {
+  const projects = await readProjects()
+  return Object.entries(projects)
+    .filter(([cwd]) => cwd !== process.cwd())
+    .map(([cwd, entry]) => ({ cwd, sessions: entry.sessions }))
+}
+
+// Atomically remove a session from another project's saved entry and return it
+// (move semantics — the caller adds it to the current project's tab list).
+// Returns null if it vanished, e.g. another csm instance took it first.
+export async function takeSession(cwd: string, claudeSessionId: string): Promise<Session | null> {
+  return enqueue(async () => {
+    const projects = await readProjects()
+    const entry = projects[cwd]
+    if (!entry) return null
+    const idx = entry.sessions.findIndex(s => s.claudeSessionId === claudeSessionId)
+    if (idx < 0) return null
+    const [taken] = entry.sessions.splice(idx, 1)
+    if (entry.sessions.length === 0) delete projects[cwd]
+    else if (entry.activeId === taken.id) entry.activeId = entry.sessions[0].id
+    await writeProjects(projects)
+    return taken
+  })
 }

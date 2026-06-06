@@ -13,7 +13,8 @@ import { SearchModal } from "./src/components/SearchModal"
 import { RenameModal } from "./src/components/RenameModal"
 import { QuitConfirmModal } from "./src/components/QuitConfirmModal"
 import { StartupModal } from "./src/components/StartupModal"
-import { loadState, saveState, freshSessionId } from "./src/persistence"
+import { OpenSessionModal } from "./src/components/OpenSessionModal"
+import { loadState, saveState, freshSessionId, loadOtherProjects, takeSession } from "./src/persistence"
 
 // Fail fast with a readable error instead of a blank TUI when claude is absent
 if (!Bun.which("claude")) {
@@ -55,6 +56,10 @@ function App() {
   const [quitConfirm, setQuitConfirm] = useState(false)
   // Show the resume/start-new chooser only when valid saved state exists
   const [showStartup, setShowStartup] = useState(initialState.restored)
+  // Cross-project picker ("o"): saved sessions from other directories
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerItems, setPickerItems] = useState<Array<{ cwd: string; session: Session }>>([])
+  const [pickerIdx, setPickerIdx] = useState(0)
 
   const termBoxRef = useRef<BoxRenderable | null>(null)
   const spawnedIds = useRef(new Set<number>())
@@ -68,7 +73,11 @@ function App() {
   const searchQueryRef = useRef("")
   const searchingRef = useRef(false)
   const showStartupRef = useRef(initialState.restored)
+  const pickerItemsRef = useRef<Array<{ cwd: string; session: Session }>>([])
+  const pickerIdxRef = useRef(0)
   useEffect(() => { showStartupRef.current = showStartup }, [showStartup])
+  useEffect(() => { pickerItemsRef.current = pickerItems }, [pickerItems])
+  useEffect(() => { pickerIdxRef.current = pickerIdx }, [pickerIdx])
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
   useEffect(() => { modeRef.current = mode }, [mode])
   useEffect(() => { sessionsRef.current = sessions }, [sessions])
@@ -190,6 +199,38 @@ function App() {
     setActiveId(id)
   }
 
+  // ── Cross-project picker ───────────────────────────────────────────────────
+
+  const openPicker = async () => {
+    const others = await loadOtherProjects()
+    setPickerItems(others.flatMap(p => p.sessions.map(session => ({ cwd: p.cwd, session }))))
+    setPickerIdx(0)
+    setPickerOpen(true)
+  }
+
+  // Move the chosen session from its source project into this one and open it.
+  const pickBorrowed = async (idx: number) => {
+    const item = pickerItemsRef.current[idx]
+    setPickerOpen(false)
+    if (!item) return
+    // Already open here? Just focus it — never resume one conversation twice.
+    const existing = sessionsRef.current.find(s => s.claudeSessionId === item.session.claudeSessionId)
+    if (existing) {
+      setActiveId(existing.id)
+      setHighlightedIdx(sessionsRef.current.indexOf(existing))
+      return
+    }
+    const taken = await takeSession(item.cwd, item.session.claudeSessionId)
+    if (!taken) return // another instance grabbed it since the list loaded
+    const id = Date.now() // fresh local id; source ids may collide with ours
+    setSessions(prev => {
+      const next = sortByFavorite([...prev, { ...taken, id }])
+      setHighlightedIdx(next.findIndex(s => s.id === id))
+      return next
+    })
+    setActiveId(id)
+  }
+
   // Swap the highlighted tab with its neighbor. Only within the same favorite
   // group — sortByFavorite re-imposes favorites-first on every add/toggle, so a
   // cross-boundary move would silently snap back later.
@@ -299,6 +340,7 @@ function App() {
         if (seq === "*") { const s = sessionsRef.current[highlightedIdxRef.current]; if (s) toggleFavorite(s.id); return true }
         if (seq === "/") { setSearching(true); setSearchQuery(""); return true }
         if (seq === "n") { addSession(); return true }
+        if (seq === "o") { openPicker(); return true }
         if (seq === "d") { setDeleteConfirm(sessionsRef.current[highlightedIdxRef.current]?.id ?? null); return true }
         if (seq === "m") { const next = !renderer.useMouse; renderer.useMouse = next; setMouseEnabled(next); return true }
         if (seq === "?") { setShowHelp(v => !v); return true }
@@ -330,6 +372,19 @@ function App() {
     renderer.prependInputHandler(handler)
     return () => renderer.removeInputHandler(handler)
   }, [showStartup])
+
+  useEffect(() => {
+    if (!pickerOpen) return
+    const handler = (seq: string) => {
+      if (seq === "j" || seq === "\x1b[B") { setPickerIdx(i => Math.min(i + 1, Math.max(pickerItemsRef.current.length - 1, 0))); return true }
+      if (seq === "k" || seq === "\x1b[A") { setPickerIdx(i => Math.max(i - 1, 0)); return true }
+      if (seq === "\r") { pickBorrowed(pickerIdxRef.current); return true }
+      if (seq === "\x1b") { setPickerOpen(false); return true }
+      return true
+    }
+    renderer.prependInputHandler(handler)
+    return () => renderer.removeInputHandler(handler)
+  }, [pickerOpen])
 
   useEffect(() => {
     if (deleteConfirm === null) return
@@ -427,6 +482,15 @@ function App() {
           sessionCount={sessions.length}
           onConfirm={quit}
           onCancel={() => setQuitConfirm(false)}
+        />
+      )}
+
+      {pickerOpen && (
+        <OpenSessionModal
+          items={pickerItems}
+          highlightedIdx={pickerIdx}
+          onSelect={pickBorrowed}
+          onCancel={() => setPickerOpen(false)}
         />
       )}
 
