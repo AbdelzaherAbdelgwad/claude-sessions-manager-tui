@@ -25,6 +25,12 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 
 ## Install
 
+**Arch Linux (AUR):**
+
+```bash
+yay -S csm-bin   # or: paru -S csm-bin
+```
+
 **One-liner:**
 
 ```bash
