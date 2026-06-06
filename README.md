@@ -1,4 +1,4 @@
-# Claude Agents
+# Claude Sessions Manager (`csm`)
 
 A terminal UI for running multiple Claude Code sessions simultaneously, built with [OpenTUI](https://github.com/opencode-ai/opentui) and [xterm-headless](https://github.com/xtermjs/xterm.js).
 
@@ -10,9 +10,12 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - **Per-session activity indicator** — animated spinner while Claude is generating, dim dot when idle
 - **Favorites** — star sessions (`*`); they sort to the front
 - **Rename** sessions (`r`) and **search/filter** them (`/`) via modals
-- **Session persistence** — tabs (names, favorites, order) are saved and restored
+- **Per-project session persistence** — tabs (names, favorites, order) are saved per launch directory and restored
 - **Conversation resume** — restored tabs reopen the actual Claude conversation (`claude --resume`)
-- **Startup chooser** — on launch, Resume previous or Start new
+- **Startup chooser** — on launch, Resume this directory's sessions or Start new
+- **Cross-project picker** — `o` lists sessions saved in other directories and moves one here as a new tab (it keeps running in its original directory)
+- **Reorder tabs** — `H` / `L` move the highlighted tab left/right
+- **Crash recovery** — if a tab's `claude` process dies, a banner appears and Enter restarts it, resuming the conversation
 - **Confirm-on-quit** — Ctrl+D prompts before closing all sessions
 - **Direct passthrough** — in INSERT mode, all keys (including `/commands`, arrows, Tab) go straight to Claude Code
 
@@ -88,11 +91,13 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 
 | Key | Action |
 |-----|--------|
-| `j` / `↓` | Move cursor to next session |
-| `k` / `↑` | Move cursor to prev session |
-| `Enter` / `l` | Open highlighted session + enter INSERT mode |
-| `i` / `a` | Enter INSERT mode (focus input) |
+| `h` / `←` | Highlight prev session |
+| `l` / `→` | Highlight next session |
+| `Enter` / `Space` | Open highlighted session |
+| `H` / `L` | Move highlighted session left / right |
+| `i` / `a` | Enter INSERT mode |
 | `n` | New session |
+| `o` | Open a session from another project (moves it here) |
 | `d` | Delete highlighted session (with confirmation) |
 | `Ctrl+C` | Delete active session (with confirmation) |
 | `Ctrl+D` | Quit |
@@ -123,7 +128,6 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 
 | Key | Action |
 |-----|--------|
-| `y` | Copy session buffer to clipboard (OSC 52) |
 | `m` | Toggle mouse off → use terminal's native text selection to copy |
 
 ### Other
@@ -152,11 +156,13 @@ Mouse is enabled by default for clicking sessions and buttons. Press `m` to disa
 
 ## Persistence
 
-State is saved to `~/.claude-sessions-manager/state.json` — tab names, favorites, order, the active tab, and each session's Claude conversation id.
+State is saved to `~/.claude-sessions-manager/state.json`, **keyed by the directory you launch `csm` from** — tab names, favorites, order, the active tab, and each session's Claude conversation id.
 
-On launch, if saved sessions exist, a **Welcome back** chooser lets you:
+On launch, if the current directory has saved sessions, a **Welcome back** chooser lets you:
 
-- **Resume previous** — restore your tabs and reopen each session's actual conversation via `claude --resume`
-- **Start new** — begin a single fresh session
+- **Resume previous** — restore this directory's tabs and reopen each conversation via `claude --resume`
+- **Start new** — begin a single fresh session (other directories' saved sessions are untouched)
+
+Sessions saved under other directories are reachable any time with `o` — picking one moves it into the current project as a new tab while it keeps running (and resuming) in its original directory.
 
 Quitting with `Ctrl+D` flushes the latest state before exit.
