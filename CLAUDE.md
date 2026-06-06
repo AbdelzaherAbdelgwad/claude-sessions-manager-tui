@@ -55,8 +55,6 @@ into an off-screen grid, then copied into the terminal box each frame.
 - INSERT mode forwards every keystroke straight to the PTY; NORMAL mode is for
   navigation. Adding/deleting/navigating sessions stays in NORMAL.
 - Conversation resume is **cwd-scoped** — sessions store and respawn in their cwd.
-- Legacy/unused: `index.ts` (original non-React prototype) and
-  `src/components/MessageInput.tsx` (input field was removed) are dead code.
 
 ---
 
