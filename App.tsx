@@ -195,15 +195,17 @@ function App() {
   }
 
   const doDelete = (id: number) => {
+    setDeleteConfirm(null)
+    // Never delete the last session — and don't kill its PTY before knowing that
+    if (sessionsRef.current.length <= 1) return
     killSession(id)
     spawnedIds.current.delete(id)
     setSessions(prev => {
       const rest = prev.filter(s => s.id !== id)
       if (activeId === id && rest.length > 0) setActiveId(rest[0].id)
       setHighlightedIdx(i => Math.min(i, rest.length - 1))
-      return rest.length > 0 ? rest : prev
+      return rest
     })
-    setDeleteConfirm(null)
   }
 
 
