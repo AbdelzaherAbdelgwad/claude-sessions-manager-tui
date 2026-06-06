@@ -49,6 +49,19 @@ export function spawnSession(id: number, cols: number, rows: number, onUpdate: (
   )
   const session: PtySession = { xterm, pty, proc, hasData: false }
   ptySessions.set(id, session)
+  // If claude dies on its own (killSession removes the map entry first, so
+  // deliberate kills don't match), show a banner and let Enter respawn it.
+  proc.exited.then((code) => {
+    if (ptySessions.get(id) !== session) return
+    session.exited = true
+    clearTimeout(idleTimers.get(id))
+    idleTimers.delete(id)
+    activity.set(id, false)
+    xterm.write(`\r\n\x1b[1;31m[claude exited (code ${code})]\x1b[0m press Enter to restart\r\n`, () => {
+      if (pinnedToBottom.has(id)) xterm.scrollToBottom()
+      onUpdate()
+    })
+  })
 }
 
 export function killSession(id: number) {

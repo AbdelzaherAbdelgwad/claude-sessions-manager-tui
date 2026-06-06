@@ -15,6 +15,12 @@ import { QuitConfirmModal } from "./src/components/QuitConfirmModal"
 import { StartupModal } from "./src/components/StartupModal"
 import { loadState, saveState, freshSessionId } from "./src/persistence"
 
+// Fail fast with a readable error instead of a blank TUI when claude is absent
+if (!Bun.which("claude")) {
+  console.error("csm: 'claude' not found in PATH — install Claude Code first: https://claude.ai/code")
+  process.exit(1)
+}
+
 const renderer = await createCliRenderer({ useMouse: true })
 
 // Stable sort: favorites first, original order preserved within each group
@@ -246,6 +252,21 @@ function App() {
         if (seq === "\x7f" || seq === "\b") { setSearchQuery(s => s.slice(0, -1)); return true }
         if (seq.length === 1 && seq.charCodeAt(0) >= 32) { setSearchQuery(s => s + seq); return true }
         return true
+      }
+
+      // Restart a dead claude with Enter (insert mode, or normal mode while the
+      // dead tab is both active and highlighted — otherwise Enter still opens tabs)
+      if (seq === "\r") {
+        const id = activeIdRef.current
+        const ps = ptySessions.get(id)
+        const onActiveTab = sessionsRef.current[highlightedIdxRef.current]?.id === id
+        if (ps?.exited && (modeRef.current === "insert" || onActiveTab)) {
+          killSession(id)
+          spawnedIds.current.delete(id)
+          const box = termBoxRef.current
+          if (box && box.width > 0 && box.height > 0) syncSession(id, box.width, box.height)
+          return true
+        }
       }
 
       const mode = modeRef.current

@@ -13,4 +13,5 @@ export interface PtySession {
   pty: Bun.Terminal
   proc: ReturnType<typeof Bun.spawn>
   hasData: boolean
+  exited?: boolean // claude process died (not killed by us); Enter respawns
 }
