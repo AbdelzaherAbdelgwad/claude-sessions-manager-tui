@@ -8,7 +8,34 @@ permissions:
   contents: write # required to create the GitHub Release
 
 jobs:
+  # Create the release with its changelog ONCE, before the build matrix —
+  # concurrent release creation/body updates from matrix legs race and 404.
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # full history so the changelog can diff against the previous tag
+      - name: Generate changelog from commits since the previous tag
+        shell: bash
+        run: |
+          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          {
+            echo "## Changes"
+            git log --no-merges --pretty='- %s (%h)' ${prev:+${prev}..}${GITHUB_REF_NAME}
+            if [ -n "$prev" ]; then
+              echo
+              echo "**Full changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${GITHUB_REF_NAME}"
+            fi
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+      - name: Create release with changelog
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+
   build:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -25,30 +52,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0 # full history so the changelog can diff against the previous tag
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - name: Compile standalone binary
         run: bun build --compile --minify --sourcemap=none --target=${{ matrix.target }} ./App.tsx --outfile ${{ matrix.asset }}
-      - name: Generate changelog from commits since the previous tag
-        shell: bash
-        run: |
-          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
-          {
-            echo "## Changes"
-            git log --no-merges --pretty='- %s (%h)' ${prev:+${prev}..}${GITHUB_REF_NAME}
-            if [ -n "$prev" ]; then
-              echo
-              echo "**Full changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${GITHUB_REF_NAME}"
-            fi
-          } > RELEASE_NOTES.md
-          cat RELEASE_NOTES.md
-      - name: Publish to release
+      - name: Upload binary to release
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ matrix.asset }}
-          body_path: RELEASE_NOTES.md
 
   publish-aur:
     needs: build
