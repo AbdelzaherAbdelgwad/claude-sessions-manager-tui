@@ -1,14 +1,19 @@
+import { homedir } from "os"
+
 interface Props {
   sessionCount: number
+  cwd: string
   onResume: () => void
   onStartNew: () => void
 }
 
-export function StartupModal({ sessionCount, onResume, onStartNew }: Props) {
+export function StartupModal({ sessionCount, cwd, onResume, onStartNew }: Props) {
+  const home = homedir()
+  const shortCwd = cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd
   return (
     <box style={{ position: "absolute", top: "30%", left: "25%", width: "50%", border: true, borderStyle: "rounded", borderColor: "#00BFFF", backgroundColor: "#111111", padding: 2, flexDirection: "column", gap: 1 }}>
       <text style={{ fg: "#00BFFF", bold: true }}>Welcome back</text>
-      <text style={{ fg: "#888888" }}>Found {sessionCount} saved session{sessionCount === 1 ? "" : "s"}.</text>
+      <text style={{ fg: "#888888" }}>Found {sessionCount} saved session{sessionCount === 1 ? "" : "s"} in {shortCwd}.</text>
       <box style={{ flexDirection: "row", gap: 2, marginTop: 1 }}>
         <box onMouseDown={onResume} style={{ border: true, borderStyle: "rounded", borderColor: "#00FF88", padding: 1 }}>
           <text style={{ fg: "#00FF88" }}>Resume previous</text>

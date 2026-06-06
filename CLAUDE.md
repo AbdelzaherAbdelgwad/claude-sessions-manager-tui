@@ -32,9 +32,13 @@ into an off-screen grid, then copied into the terminal box each frame.
 - **`src/colors.ts`** — adapts xterm's packed cell colors → OpenTUI `RGBA`
   (`xtermColor`) and styles → attr bitmask (`cellAttrs`). Only consumed by
   `render.ts`.
-- **`src/persistence.ts`** — `~/.claude-sessions-manager/state.json`. `loadState`
-  / `saveState`, `freshSessionId` (collision-guarded UUID mint), `conversationExists`
-  (globs `~/.claude/projects/*/<uuid>.jsonl` to decide resume vs fresh).
+- **`src/persistence.ts`** — `~/.claude-sessions-manager/state.json`, a v3
+  `projects` map keyed by launch cwd: `loadState`/`saveState` touch only the
+  `process.cwd()` entry (read-modify-write), so resume suggestions are
+  per-directory and other projects' sessions are never clobbered. Migrates
+  v1/v2 flat lists by grouping on each session's `cwd`. `freshSessionId`
+  (collision-guarded UUID mint), `conversationExists` (globs
+  `~/.claude/projects/*/<uuid>.jsonl` to decide resume vs fresh).
 - **`src/types.ts`** — `Mode`, `Session` (id, name, favorite?, claudeSessionId, cwd),
   `PtySession`.
 - **`src/components/*.tsx`** — dumb presentational components: `SessionList`

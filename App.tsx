@@ -392,6 +392,7 @@ function App() {
       {showStartup && (
         <StartupModal
           sessionCount={sessions.length}
+          cwd={process.cwd()}
           onResume={resumePrevious}
           onStartNew={startNew}
         />

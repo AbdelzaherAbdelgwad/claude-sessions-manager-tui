@@ -7,12 +7,18 @@ const STATE_DIR = join(homedir(), ".claude-sessions-manager")
 const STATE_FILE = join(STATE_DIR, "state.json")
 const PROJECTS_DIR = join(homedir(), ".claude", "projects")
 
-const STATE_VERSION = 2
+const STATE_VERSION = 3
 
-interface PersistedState {
-  version: number
+interface ProjectState {
   activeId: number
   sessions: Session[]
+}
+
+// v3: sessions are keyed by the directory csm was launched from, so each
+// project resumes only its own tabs and never clobbers another project's.
+interface PersistedState {
+  version: number
+  projects: Record<string, ProjectState>
 }
 
 interface LoadedState {
@@ -50,41 +56,74 @@ export function conversationExists(uuid: string): boolean {
   }
 }
 
-// Read persisted state at startup. Returns defaults (restored=false) if missing or invalid.
-export async function loadState(): Promise<LoadedState> {
-  try {
-    const raw = await Bun.file(STATE_FILE).json()
-    if (raw?.version > STATE_VERSION || !Array.isArray(raw?.sessions) || raw.sessions.length === 0) {
-      return defaultState()
-    }
-    const taken = new Set<string>()
-    const sessions: Session[] = raw.sessions
-      .filter((s: any) => typeof s?.id === "number" && typeof s?.name === "string")
-      .map((s: any) => {
-        // Migrate v1 (no claudeSessionId/cwd) by minting fresh values
-        const claudeSessionId =
-          typeof s.claudeSessionId === "string" ? s.claudeSessionId : freshSessionId(taken)
-        taken.add(claudeSessionId)
-        return {
-          id: s.id,
-          name: s.name,
-          favorite: !!s.favorite,
-          claudeSessionId,
-          cwd: typeof s.cwd === "string" ? s.cwd : process.cwd(),
-        }
-      })
-    if (sessions.length === 0) return defaultState()
-    const activeId = sessions.some(s => s.id === raw.activeId) ? raw.activeId : sessions[0].id
-    return { sessions, activeId, restored: true }
-  } catch {
-    return defaultState()
-  }
+// Validate raw session entries; migrate v1 (no claudeSessionId/cwd) by minting fresh values.
+function sanitizeSessions(raw: any[], taken: Set<string>): Session[] {
+  return raw
+    .filter((s: any) => typeof s?.id === "number" && typeof s?.name === "string")
+    .map((s: any) => {
+      const claudeSessionId =
+        typeof s.claudeSessionId === "string" ? s.claudeSessionId : freshSessionId(taken)
+      taken.add(claudeSessionId)
+      return {
+        id: s.id,
+        name: s.name,
+        favorite: !!s.favorite,
+        claudeSessionId,
+        cwd: typeof s.cwd === "string" ? s.cwd : process.cwd(),
+      }
+    })
 }
 
-// Persist current state. Best-effort; failures are swallowed.
+// Read the full on-disk state as a cwd → ProjectState map.
+// Migrates v1/v2 (flat session list) by grouping sessions by their saved cwd.
+async function readProjects(): Promise<Record<string, ProjectState>> {
+  let raw: any
+  try {
+    raw = await Bun.file(STATE_FILE).json()
+  } catch {
+    return {}
+  }
+  if (raw?.version > STATE_VERSION) return {}
+  const taken = new Set<string>()
+  const projects: Record<string, ProjectState> = {}
+
+  if (raw?.projects && typeof raw.projects === "object") {
+    // v3
+    for (const [cwd, entry] of Object.entries<any>(raw.projects)) {
+      if (!Array.isArray(entry?.sessions)) continue
+      const sessions = sanitizeSessions(entry.sessions, taken)
+      if (sessions.length === 0) continue
+      const activeId = sessions.some(s => s.id === entry.activeId) ? entry.activeId : sessions[0].id
+      projects[cwd] = { activeId, sessions }
+    }
+  } else if (Array.isArray(raw?.sessions)) {
+    // v1/v2: group the flat list by each session's cwd
+    for (const session of sanitizeSessions(raw.sessions, taken)) {
+      ;(projects[session.cwd] ??= { activeId: session.id, sessions: [] }).sessions.push(session)
+    }
+    for (const entry of Object.values(projects)) {
+      if (entry.sessions.some(s => s.id === raw.activeId)) entry.activeId = raw.activeId
+    }
+  }
+  return projects
+}
+
+// Read persisted state for the current directory at startup.
+// Returns defaults (restored=false) if this directory has no saved sessions.
+export async function loadState(): Promise<LoadedState> {
+  const entry = (await readProjects())[process.cwd()]
+  if (!entry) return defaultState()
+  return { sessions: entry.sessions, activeId: entry.activeId, restored: true }
+}
+
+// Persist current state under this directory's key, preserving other projects'
+// entries (read-modify-write so concurrent csm instances don't clobber each other).
+// Best-effort; failures are swallowed.
 export async function saveState(sessions: Session[], activeId: number): Promise<void> {
   try {
-    const state: PersistedState = { version: STATE_VERSION, activeId, sessions }
+    const projects = await readProjects()
+    projects[process.cwd()] = { activeId, sessions }
+    const state: PersistedState = { version: STATE_VERSION, projects }
     await Bun.write(STATE_FILE, JSON.stringify(state, null, 2))
   } catch {
     // ignore — persistence is best-effort
