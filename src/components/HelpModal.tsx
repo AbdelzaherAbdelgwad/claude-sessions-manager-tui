@@ -1,6 +1,7 @@
 const HELP_LINES = [
   ["h / ←", "prev session"],
   ["l / →", "next session"],
+  ["H / L", "move session left / right"],
   ["1-9", "jump to session 1-9"],
   ["Enter / Space", "open session + insert mode"],
   ["i / a", "enter insert mode"],

@@ -190,6 +190,22 @@ function App() {
     setActiveId(id)
   }
 
+  // Swap the highlighted tab with its neighbor. Only within the same favorite
+  // group — sortByFavorite re-imposes favorites-first on every add/toggle, so a
+  // cross-boundary move would silently snap back later.
+  const moveSession = (delta: -1 | 1) => {
+    const idx = highlightedIdxRef.current
+    const target = idx + delta
+    setSessions(prev => {
+      if (target < 0 || target >= prev.length) return prev
+      if (!!prev[idx].favorite !== !!prev[target].favorite) return prev
+      const next = [...prev]
+      ;[next[idx], next[target]] = [next[target], next[idx]]
+      setHighlightedIdx(target)
+      return next
+    })
+  }
+
   const toggleFavorite = (id: number) => {
     setSessions(prev => {
       const sorted = sortByFavorite(prev.map(s => s.id === id ? { ...s, favorite: !s.favorite } : s))
@@ -275,6 +291,8 @@ function App() {
         const len = sessionsRef.current.length
         if (seq === "l" || seq === "\x1b[C") { setHighlightedIdx(i => Math.min(i + 1, len - 1)); return true }
         if (seq === "h" || seq === "\x1b[D") { setHighlightedIdx(i => Math.max(i - 1, 0)); return true }
+        if (seq === "L") { moveSession(1); return true }
+        if (seq === "H") { moveSession(-1); return true }
         if (seq === "\r" || seq === " ") { openSession(highlightedIdxRef.current); return true }
         if (seq === "i" || seq === "a") { setMode("insert"); return true }
         if (seq === "r") { const s = sessionsRef.current[highlightedIdxRef.current]; if (s) { setRenaming(s.id); setRenameInput(s.name); } return true }
