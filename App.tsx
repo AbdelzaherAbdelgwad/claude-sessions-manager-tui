@@ -22,7 +22,15 @@ if (!Bun.which("claude")) {
   process.exit(1)
 }
 
-const renderer = await createCliRenderer({ useMouse: true })
+// OpenTUI negotiates the kitty keyboard protocol by default. On terminals that
+// advertise support for it (newer terminal/OS versions), Escape then arrives as
+// CSI-u (`\x1b[27u`) and Ctrl+C/Ctrl+D as `\x1b[..;5u` instead of bare `\x1b`/
+// `\x03`/`\x04`, so every literal `seq === ...` check silently fails — most
+// visibly ESC no longer exits INSERT mode and you get stuck there with all keys
+// forwarded to claude. Terminals without kitty support are unaffected, which is
+// why it works on some machines but not others. We forward raw bytes to the PTY
+// anyway, so legacy encodings are what we want: disable kitty entirely.
+const renderer = await createCliRenderer({ useMouse: true, useKittyKeyboard: false })
 
 // Stable sort: favorites first, original order preserved within each group
 const sortByFavorite = (list: Session[]): Session[] =>
