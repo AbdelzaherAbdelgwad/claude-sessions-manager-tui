@@ -10,6 +10,8 @@ const HELP_LINES = [
   ["i / a", "enter insert mode"],
   ["r", "rename session"],
   ["*", "star/unstar session (sorts to front)"],
+  ["c", "cycle session color tag"],
+  ["t", "theme menu (presets + accent color)"],
   ["/", "search sessions"],
   ["Esc", "normal mode / forward to Claude"],
   ["n", "new session"],
@@ -35,6 +37,7 @@ const LEGEND = [
 const DISPLAY_PATH = CONFIG_PATH.replace(homedir(), "~")
 
 const CONFIG_LINES = [
+  ["theme", "dark / light / solarized (a colors override wins per-key)"],
   ["colors", "active / highlight / attention / waiting / busy / branch / cwd …"],
   ["timing", "idleMs, waitingMs (idle → “waiting”), gitPollMs"],
   ["behavior", "showCwd, showBranch"],

@@ -25,7 +25,7 @@ const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", 
 // Approximate rendered width of a tab, in columns: border(2) + paddingX(4) +
 // dot+space(2) + name + star(2 if fav) + ✕(2 if deletable) + inter-tab gap(1).
 function tabWidth(s: Session, multi: boolean): number {
-  return 2 + 4 + 2 + s.name.length + (s.favorite ? 2 : 0) + (multi ? 2 : 0) + 1
+  return 2 + 4 + 2 + s.name.length + (s.color ? 2 : 0) + (s.favorite ? 2 : 0) + (multi ? 2 : 0) + 1
 }
 
 // Pick a contiguous run of tabs that fits `maxWidth`, always keeping the focused
@@ -94,6 +94,9 @@ export function SessionList({ sessions, activeId, highlightedIdx, isInsert, onSe
               backgroundColor: active ? "#1a1a2e" : highlighted ? "#252525" : undefined,
             }}
           >
+            {s.color && (
+              <text style={{ fg: s.color, marginRight: 1 }}>▍</text>
+            )}
             {s.favorite && (
               <text style={{ fg: c.attention, marginRight: 1 }}>★</text>
             )}

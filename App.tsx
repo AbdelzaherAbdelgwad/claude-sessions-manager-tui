@@ -5,7 +5,7 @@ import { paintXterm } from "./src/render"
 import { ptySessions, spawnSession, killSession, pinnedToBottom, activity, waiting, attention, setActiveSession } from "./src/pty"
 import type { Mode, Session } from "./src/types"
 import type { SessionStatus } from "./src/components/StatusBar"
-import { config } from "./src/config"
+import { config, applyTheme, setColor, isHexColor, themeNames } from "./src/config"
 import { SessionList } from "./src/components/SessionList"
 import { TerminalView } from "./src/components/TerminalView"
 import { StatusBar } from "./src/components/StatusBar"
@@ -16,6 +16,7 @@ import { RenameModal } from "./src/components/RenameModal"
 import { QuitConfirmModal } from "./src/components/QuitConfirmModal"
 import { StartupModal } from "./src/components/StartupModal"
 import { OpenSessionModal } from "./src/components/OpenSessionModal"
+import { ThemeModal } from "./src/components/ThemeModal"
 import { loadState, saveState, freshSessionId, loadOtherProjects, takeSession } from "./src/persistence"
 import { gitBranch } from "./src/gitInfo"
 
@@ -34,6 +35,9 @@ if (!Bun.which("claude")) {
 // why it works on some machines but not others. We forward raw bytes to the PTY
 // anyway, so legacy encodings are what we want: disable kitty entirely.
 const renderer = await createCliRenderer({ useMouse: true, useKittyKeyboard: false })
+
+// Color tags cycled by `c` on the highlighted tab. undefined = no tag.
+const TAG_COLORS: Array<string | undefined> = [undefined, "#FF5555", "#FFB86C", "#F1FA8C", "#50FA7B", "#8BE9FD", "#BD93F9", "#FF79C6"]
 
 // Stable sort: favorites first, original order preserved within each group
 const sortByFavorite = (list: Session[]): Session[] =>
@@ -75,6 +79,11 @@ function App() {
   const [branches, setBranches] = useState<Map<number, string>>(new Map())
   // Terminal width in columns, tracked so the tab bar can window on overflow.
   const [termWidth, setTermWidth] = useState(renderer.terminalWidth)
+  // Theme modal (`t`): preset selection + a hex input for the accent color.
+  const [themeModalOpen, setThemeModalOpen] = useState(false)
+  const [themeSel, setThemeSel] = useState(0)
+  const [themeEditing, setThemeEditing] = useState(false)
+  const [themeEdit, setThemeEdit] = useState("")
 
   const termBoxRef = useRef<BoxRenderable | null>(null)
   const spawnedIds = useRef(new Set<number>())
@@ -90,6 +99,8 @@ function App() {
   const showStartupRef = useRef(initialState.restored)
   const pickerItemsRef = useRef<Array<{ cwd: string; session: Session }>>([])
   const pickerIdxRef = useRef(0)
+  const themeEditingRef = useRef(false)
+  useEffect(() => { themeEditingRef.current = themeEditing }, [themeEditing])
   useEffect(() => { showStartupRef.current = showStartup }, [showStartup])
   useEffect(() => { pickerItemsRef.current = pickerItems }, [pickerItems])
   useEffect(() => { pickerIdxRef.current = pickerIdx }, [pickerIdx])
@@ -228,6 +239,13 @@ function App() {
     setActiveId(s.id)
   }
 
+  // Enter INSERT mode. If mouse was toggled off (m-mode), turn it back on so the
+  // terminal border (which is hidden while mouse is off) reappears.
+  const enterInsert = () => {
+    setMode("insert")
+    if (!renderer.useMouse) { renderer.useMouse = true; setMouseEnabled(true) }
+  }
+
   const addSession = () => {
     const id = Date.now()
     setSessions(prev => {
@@ -288,6 +306,15 @@ function App() {
       setHighlightedIdx(target)
       return next
     })
+  }
+
+  // Cycle the highlighted tab's color tag through TAG_COLORS (wraps to no tag).
+  const cycleColor = (id: number) => {
+    setSessions(prev => prev.map(s => {
+      if (s.id !== id) return s
+      const idx = TAG_COLORS.indexOf(s.color)
+      return { ...s, color: TAG_COLORS[(idx + 1) % TAG_COLORS.length] }
+    }))
   }
 
   const toggleFavorite = (id: number) => {
@@ -378,9 +405,11 @@ function App() {
         if (seq === "L") { moveSession(1); return true }
         if (seq === "H") { moveSession(-1); return true }
         if (seq === "\r" || seq === " ") { openSession(highlightedIdxRef.current); return true }
-        if (seq === "i" || seq === "a") { setMode("insert"); return true }
+        if (seq === "i" || seq === "a") { enterInsert(); return true }
         if (seq === "r") { const s = sessionsRef.current[highlightedIdxRef.current]; if (s) { setRenaming(s.id); setRenameInput(s.name); } return true }
         if (seq === "*") { const s = sessionsRef.current[highlightedIdxRef.current]; if (s) toggleFavorite(s.id); return true }
+        if (seq === "c") { const s = sessionsRef.current[highlightedIdxRef.current]; if (s) cycleColor(s.id); return true }
+        if (seq === "t") { setThemeSel(Math.max(0, themeNames.indexOf(config.theme))); setThemeEditing(false); setThemeEdit(""); setThemeModalOpen(true); return true }
         if (seq === "/") { setSearching(true); setSearchQuery(""); return true }
         if (seq === "n") { addSession(); return true }
         if (seq === "o") { openPicker(); return true }
@@ -439,6 +468,68 @@ function App() {
     renderer.prependInputHandler(handler)
     return () => renderer.removeInputHandler(handler)
   }, [deleteConfirm])
+
+  // Theme modal: presets (Enter applies) + an accent-color hex field. Re-reads
+  // its own state each keystroke, so it depends on that state.
+  useEffect(() => {
+    if (!themeModalOpen) return
+    const accentIdx = themeNames.length
+    const count = themeNames.length + 1
+    const rerender = () => { setTerminalUpdate(n => n + 1); renderer.requestRender() }
+    const handler = (seq: string) => {
+      if (themeEditing) {
+        if (seq === "\x1b") { setThemeEditing(false); setThemeEdit(""); return true }
+        if (seq === "\r") {
+          if (isHexColor(themeEdit)) { setColor("active", themeEdit); rerender() }
+          setThemeEditing(false); setThemeEdit("")
+          return true
+        }
+        if (seq === "\x7f" || seq === "\b") { setThemeEdit(s => s.slice(0, -1)); return true }
+        // Accept single keystrokes AND pasted chunks: strip bracketed-paste
+        // markers first. Any ESC still present means a control sequence (arrow
+        // keys are \x1b[C etc., and A-F are also hex letters) — ignore those, or
+        // they'd inject stray characters. Otherwise keep only hex-ish chars.
+        const cleaned = seq.replace(/\x1b\[20[01]~/g, "")
+        if (cleaned.includes("\x1b")) return true
+        const hex = cleaned.replace(/[^0-9a-fA-F#]/g, "")
+        if (hex) { setThemeEdit(s => (s + hex).slice(0, 7)); return true }
+        return true
+      }
+      if (seq === "\x1b" || seq === "t") { setThemeModalOpen(false); return true }
+      if (seq === "j" || seq === "\x1b[B") { setThemeSel(i => Math.min(i + 1, count - 1)); return true }
+      if (seq === "k" || seq === "\x1b[A") { setThemeSel(i => Math.max(i - 1, 0)); return true }
+      if (seq === "\r" || seq === " ") {
+        if (themeSel < accentIdx) { applyTheme(themeNames[themeSel]); rerender() }
+        else { setThemeEditing(true); setThemeEdit("") }
+        return true
+      }
+      return true // swallow all other keys while the modal is open
+    }
+    renderer.prependInputHandler(handler)
+    return () => renderer.removeInputHandler(handler)
+  }, [themeModalOpen, themeSel, themeEditing, themeEdit])
+
+  // Bracketed paste (e.g. Ctrl+Shift+V) is delivered by OpenTUI as a separate
+  // `paste` event, NOT through the input handlers — so without this, paste does
+  // nothing anywhere in the app. Route it: into the accent-hex field when that's
+  // being edited, otherwise forward to the active session's PTY re-wrapped in
+  // bracketed-paste markers so Claude Code treats multiline pastes as one paste
+  // (raw newlines would otherwise submit the prompt line-by-line).
+  useEffect(() => {
+    const onPaste = (e: any) => {
+      const text = typeof e?.text === "string" ? e.text : new TextDecoder().decode(e?.bytes ?? new Uint8Array())
+      if (!text) return
+      if (themeEditingRef.current) {
+        const hex = text.replace(/[^0-9a-fA-F#]/g, "")
+        if (hex) { setThemeEdit(s => (s + hex).slice(0, 7)); renderer.requestRender() }
+        return
+      }
+      const ps = ptySessions.get(activeIdRef.current)
+      if (ps && !ps.exited) ps.pty.write("\x1b[200~" + text + "\x1b[201~")
+    }
+    renderer.keyInput.on("paste", onPaste)
+    return () => { renderer.keyInput.off("paste", onPaste) }
+  }, [])
 
   useEffect(() => {
     if (!quitConfirm) return
@@ -504,7 +595,7 @@ function App() {
           title={activeName}
           mouseEnabled={mouseEnabled}
           termBoxRef={termBoxRef}
-          onMouseDown={() => setMode("insert")}
+          onMouseDown={() => enterInsert()}
         />
       </box>
 
@@ -516,6 +607,19 @@ function App() {
           isFavorite={!!sessions.find(s => s.id === deleteConfirm)?.favorite}
           onConfirm={() => doDelete(deleteConfirm)}
           onCancel={() => setDeleteConfirm(null)}
+        />
+      )}
+
+      {themeModalOpen && (
+        <ThemeModal
+          themeNames={themeNames}
+          currentTheme={config.theme}
+          accentColor={config.colors.active}
+          selectedIdx={themeSel}
+          editing={themeEditing}
+          editBuffer={themeEdit}
+          onSelectPreset={(name) => { setThemeSel(themeNames.indexOf(name)); applyTheme(name); setTerminalUpdate(n => n + 1); renderer.requestRender() }}
+          onFocusAccent={() => { setThemeSel(themeNames.length); setThemeEditing(true); setThemeEdit("") }}
         />
       )}
 

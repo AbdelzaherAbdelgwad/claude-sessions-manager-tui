@@ -11,7 +11,8 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - **Attention signals** — a tab lights up gold when its session finishes a turn or rings the bell while you're viewing another tab; switching to it clears the flag
 - **Tab-bar overflow** — when tabs exceed the terminal width, they window around the highlighted one with `‹N` / `N›` chevrons showing how many are hidden (click a chevron to reveal them)
 - **Status-bar context** — the bottom bar shows the active session's directory, git branch, and live state (`working…` / `waiting for input`)
-- **Configurable** — colors, timing thresholds, and display toggles via `~/.claude-sessions-manager/config.json`
+- **Configurable** — theme presets, colors, timing thresholds, and display toggles via `~/.claude-sessions-manager/config.json`
+- **Color tags** — tag a tab with a color (`c` cycles) to group related sessions visually
 - **Favorites** — star sessions (`*`); they sort to the front
 - **Rename** sessions (`r`) and **search/filter** them (`/`) via modals
 - **Per-project session persistence** — tabs (names, favorites, order) are saved per launch directory and restored
@@ -113,6 +114,8 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 | `1` – `9` | Jump to session N |
 | `r` | Rename session |
 | `*` | Star / unstar session (sorts to front) |
+| `c` | Cycle the highlighted session's color tag |
+| `t` | Open the theme menu (pick a preset or set the accent color) |
 | `/` | Search / filter sessions |
 
 ### INSERT mode
@@ -155,6 +158,8 @@ The active tab has an orange name/border; the keyboard-highlighted tab has a blu
 - `●` gold = wants attention (finished on a tab you weren't viewing)
 - `○` dim = idle
 
+A `▍` bar in a session's color appears at the left of the tab when it has a color tag (`c` to cycle).
+
 Other interactions:
 
 - Click any session to activate it
@@ -185,14 +190,20 @@ On first run, `csm` writes a config file with defaults to `~/.claude-sessions-ma
 
 | Section | Keys | Purpose |
 |---------|------|---------|
+| `theme` | `dark`, `light`, `solarized` | A named color preset used as the base palette |
 | `colors` | `active`, `highlight`, `attention`, `waiting`, `busy`, `idleDot`, `name`, `border`, `branch`, `cwd` | Hex colors for tab and status-bar elements |
 | `timing` | `idleMs`, `waitingMs`, `gitPollMs` | Silence before the spinner stops; sustained silence before a turn counts as "waiting for input"; how often git branches are re-read |
 | `behavior` | `showCwd`, `showBranch` | Toggle the directory / git branch in the status bar |
 
-Example — dim the attention color and wait longer before flagging a turn as done:
+`theme` picks the base palette; any keys you set under `colors` **override the theme per-key**, so a custom color always wins over the preset.
+
+Press `t` in the app to open the **theme menu**: choose a preset, or select the accent-color field and type a `#RRGGBB` value (the accent colors active-tab borders/names and the terminal frame). Changes apply immediately and are written back to `config.json` — a custom accent set this way persists as a `colors.active` override and survives preset switches. Editing the file by hand instead requires a restart, since the config is read once at startup.
+
+Example — use the Solarized preset but force a custom attention color, and wait longer before flagging a turn as done:
 
 ```json
 {
+  "theme": "solarized",
   "colors": { "attention": "#B8860B" },
   "timing": { "waitingMs": 5000 }
 }

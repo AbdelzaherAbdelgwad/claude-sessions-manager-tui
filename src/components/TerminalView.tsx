@@ -1,5 +1,6 @@
 import type { BoxRenderable } from "@opentui/core"
 import type { RefObject } from "react"
+import { config } from "../config"
 
 interface Props {
   title: string
@@ -15,7 +16,7 @@ export function TerminalView({ title, mouseEnabled, termBoxRef, onMouseDown }: P
       bottomTitle={mouseEnabled ? " m → select mode to copy " : " m → exit select mode "}
       bottomTitleAlignment="right"
       onMouseDown={onMouseDown}
-      style={{ width: "100%", flexGrow: 1, border: true, borderStyle: "rounded", borderColor: mouseEnabled ? "#FFA500" : "transparent", padding: 1 }}
+      style={{ width: "100%", flexGrow: 1, border: true, borderStyle: "rounded", borderColor: mouseEnabled ? config.colors.active : "transparent", padding: 1 }}
     >
       <box ref={termBoxRef} style={{ width: "100%", height: "100%" }} />
     </box>
