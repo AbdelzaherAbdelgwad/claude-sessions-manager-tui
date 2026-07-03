@@ -7,7 +7,11 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 ## Features
 
 - **Multiple Claude sessions** as browser-style tabs in a top bar
-- **Per-session activity indicator** — animated spinner while Claude is generating, dim dot when idle
+- **Per-session status indicator** — animated spinner while Claude is generating, a cyan dot when it's finished and waiting for your input, and a gold dot on background tabs that need attention (distinguishes "still working" from "waiting for you")
+- **Attention signals** — a tab lights up gold when its session finishes a turn or rings the bell while you're viewing another tab; switching to it clears the flag
+- **Tab-bar overflow** — when tabs exceed the terminal width, they window around the highlighted one with `‹N` / `N›` chevrons showing how many are hidden (click a chevron to reveal them)
+- **Status-bar context** — the bottom bar shows the active session's directory, git branch, and live state (`working…` / `waiting for input`)
+- **Configurable** — colors, timing thresholds, and display toggles via `~/.claude-sessions-manager/config.json`
 - **Favorites** — star sessions (`*`); they sort to the front
 - **Rename** sessions (`r`) and **search/filter** them (`/`) via modals
 - **Per-project session persistence** — tabs (names, favorites, order) are saved per launch directory and restored
@@ -144,11 +148,19 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 
 ## Session List
 
-- `>` blue cursor = keyboard-highlighted session
-- `●` orange = currently active session
+The active tab has an orange name/border; the keyboard-highlighted tab has a blue one. Each tab carries a status marker:
+
+- `⠋` green spinner = streaming (Claude is generating)
+- `●` cyan = finished its turn, waiting for your input
+- `●` gold = wants attention (finished on a tab you weren't viewing)
+- `○` dim = idle
+
+Other interactions:
+
 - Click any session to activate it
-- Click `+ New` or press `n` to create a new session
+- Click `+` or press `n` to create a new session
 - Click `✕` or press `d` to delete
+- When tabs overflow, click a `‹N` / `N›` chevron to jump to hidden tabs
 
 ## Mouse Support
 
@@ -166,3 +178,22 @@ On launch, if the current directory has saved sessions, a **Welcome back** choos
 Sessions saved under other directories are reachable any time with `o` — picking one moves it into the current project as a new tab while it keeps running (and resuming) in its original directory.
 
 Quitting with `Ctrl+D` flushes the latest state before exit.
+
+## Configuration
+
+On first run, `csm` writes a config file with defaults to `~/.claude-sessions-manager/config.json`. Edit it and restart to apply changes; you only need to include the keys you want to override (they're deep-merged over the defaults).
+
+| Section | Keys | Purpose |
+|---------|------|---------|
+| `colors` | `active`, `highlight`, `attention`, `waiting`, `busy`, `idleDot`, `name`, `border`, `branch`, `cwd` | Hex colors for tab and status-bar elements |
+| `timing` | `idleMs`, `waitingMs`, `gitPollMs` | Silence before the spinner stops; sustained silence before a turn counts as "waiting for input"; how often git branches are re-read |
+| `behavior` | `showCwd`, `showBranch` | Toggle the directory / git branch in the status bar |
+
+Example — dim the attention color and wait longer before flagging a turn as done:
+
+```json
+{
+  "colors": { "attention": "#B8860B" },
+  "timing": { "waitingMs": 5000 }
+}
+```

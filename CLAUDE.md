@@ -56,6 +56,14 @@ into an off-screen grid, then copied into the terminal box each frame.
   navigation. Adding/deleting/navigating sessions stays in NORMAL.
 - Conversation resume is **cwd-scoped** — sessions store and respawn in their cwd.
 
+## Workflow
+
+- **Before every commit, update `README.md` if needed** — when a change adds or
+  alters a user-facing feature (keybinding, tab/status-bar indicator, config
+  option, persistence behavior), reflect it in the README's Features list and
+  the relevant section in the same commit. Skip only for internal/refactor
+  changes with no user-visible effect.
+
 ---
 
 Default to using Bun instead of Node.js.
