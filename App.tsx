@@ -2,8 +2,10 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { createCliRenderer, LayoutEvents, type BoxRenderable } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import { paintXterm } from "./src/render"
-import { ptySessions, spawnSession, killSession, pinnedToBottom, activity, attention, setActiveSession } from "./src/pty"
+import { ptySessions, spawnSession, killSession, pinnedToBottom, activity, waiting, attention, setActiveSession } from "./src/pty"
 import type { Mode, Session } from "./src/types"
+import type { SessionStatus } from "./src/components/StatusBar"
+import { config } from "./src/config"
 import { SessionList } from "./src/components/SessionList"
 import { TerminalView } from "./src/components/TerminalView"
 import { StatusBar } from "./src/components/StatusBar"
@@ -71,6 +73,8 @@ function App() {
   const [pickerIdx, setPickerIdx] = useState(0)
   // Per-session git branch (id → branch name), polled from each session's cwd.
   const [branches, setBranches] = useState<Map<number, string>>(new Map())
+  // Terminal width in columns, tracked so the tab bar can window on overflow.
+  const [termWidth, setTermWidth] = useState(renderer.terminalWidth)
 
   const termBoxRef = useRef<BoxRenderable | null>(null)
   const spawnedIds = useRef(new Set<number>())
@@ -134,9 +138,17 @@ function App() {
       })
     }
     compute()
-    const t = setInterval(compute, 4000)
+    const t = setInterval(compute, config.timing.gitPollMs)
     return () => clearInterval(t)
   }, [sessions])
+
+  // ── Track terminal width so the tab bar can window when tabs overflow ───────
+
+  useEffect(() => {
+    const onResize = () => { setTermWidth(renderer.terminalWidth); renderer.requestRender() }
+    renderer.on("resize", onResize)
+    return () => { renderer.off("resize", onResize) }
+  }, [])
 
   // ── Sync PTY dimensions with terminal box ──────────────────────────────────
 
@@ -450,6 +462,7 @@ function App() {
   const activeSession = sessions.find(s => s.id === activeId)
   const activeName = activeSession?.name ?? ""
   const isInsert = mode === "insert"
+  const activeStatus: SessionStatus = activity.get(activeId) ? "working" : waiting.get(activeId) ? "waiting" : "idle"
 
   return (
     <box style={{ flexDirection: "column", width: "100%", height: "100%" }}>
@@ -479,7 +492,9 @@ function App() {
             searching={searching}
             activeSessions={activity}
             attention={attention}
+            waiting={waiting}
             spinnerFrame={spinnerFrame}
+            maxWidth={termWidth}
           />
         </box>
       </box>
@@ -493,7 +508,7 @@ function App() {
         />
       </box>
 
-      <StatusBar mode={mode} activeName={activeName} activeCwd={activeSession?.cwd} activeBranch={activeId != null ? branches.get(activeId) : undefined} />
+      <StatusBar mode={mode} activeName={activeName} activeCwd={activeSession?.cwd} activeBranch={activeId != null ? branches.get(activeId) : undefined} activeStatus={activeStatus} />
 
       {deleteConfirm !== null && (
         <DeleteConfirmModal
