@@ -13,18 +13,22 @@ interface Props {
   searchQuery?: string
   searching?: boolean
   activeSessions?: Map<number, boolean>
+  attention?: Map<number, boolean>
   spinnerFrame?: number
 }
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
-export function SessionList({ sessions, activeId, highlightedIdx, isInsert, onSelect, onDelete, onAdd, renaming, renameInput, searchQuery, searching, activeSessions, spinnerFrame = 0 }: Props) {
+export function SessionList({ sessions, activeId, highlightedIdx, isInsert, onSelect, onDelete, onAdd, renaming, renameInput, searchQuery, searching, activeSessions, attention, spinnerFrame = 0 }: Props) {
   return (
     <box style={{ width: "100%", height: "100%", flexDirection: "row", paddingY: 0, gap: 1, overflow: "hidden" }}>
       {sessions.map((s, i) => {
         const active = s.id === activeId
         const highlighted = i === highlightedIdx && !isInsert
         const busy = activeSessions?.get(s.id)
+        // Attention: finished/rang the bell while unviewed. Never on the active
+        // tab (you're looking at it), and busy takes visual priority.
+        const needsAttention = !active && !busy && attention?.get(s.id)
         return (
           <box
             key={s.id}
@@ -38,17 +42,17 @@ export function SessionList({ sessions, activeId, highlightedIdx, isInsert, onSe
               margin: 0,
               border: true,
               borderStyle: "rounded",
-              borderColor: active ? "#FFA500" : highlighted ? "#00BFFF" : "#333333",
+              borderColor: active ? "#FFA500" : needsAttention ? "#FFD700" : highlighted ? "#00BFFF" : "#333333",
               backgroundColor: active ? "#1a1a2e" : highlighted ? "#252525" : undefined,
             }}
           >
             {s.favorite && (
               <text style={{ fg: "#FFD700", marginRight: 1 }}>★</text>
             )}
-            <text style={{ fg: busy ? "#00FF88" : "#444444", marginRight: 1 }}>
-              {busy ? SPINNER[spinnerFrame % SPINNER.length] : "○"}
+            <text style={{ fg: busy ? "#00FF88" : needsAttention ? "#FFD700" : "#444444", marginRight: 1 }}>
+              {busy ? SPINNER[spinnerFrame % SPINNER.length] : needsAttention ? "●" : "○"}
             </text>
-            <text style={{ fg: active ? "#FFA500" : highlighted ? "#00BFFF" : "#888888" }}>
+            <text style={{ fg: active ? "#FFA500" : needsAttention ? "#FFD700" : highlighted ? "#00BFFF" : "#888888" }}>
               {s.name}
             </text>
             {sessions.length > 1 && (

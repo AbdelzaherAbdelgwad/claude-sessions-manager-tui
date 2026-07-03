@@ -8,7 +8,22 @@ export const ptySessions = new Map<number, PtySession>()
 export const pinnedToBottom = new Set<number>()
 // True while a session's PTY is actively streaming output (Claude generating)
 export const activity = new Map<number, boolean>()
+// True when a session finished streaming (or rang the bell) while you were
+// looking at a DIFFERENT tab — i.e. it likely wants your attention. Cleared by
+// setActiveSession when you switch to it.
+export const attention = new Map<number, boolean>()
 const idleTimers = new Map<number, ReturnType<typeof setTimeout>>()
+
+// The tab currently on screen. A session going idle while it's the active tab
+// isn't "unseen", so it never raises an attention flag.
+let activeSessionId = -1
+
+// Called by the UI whenever the visible tab changes. Switching to a session
+// also acknowledges (clears) its pending attention flag.
+export function setActiveSession(id: number) {
+  activeSessionId = id
+  attention.delete(id)
+}
 
 // How long the output must stay quiet before a session is considered idle
 const IDLE_MS = 600
@@ -33,12 +48,21 @@ export function spawnSession(id: number, cols: number, rows: number, onUpdate: (
         idleTimers.set(id, setTimeout(() => {
           activity.set(id, false)
           idleTimers.delete(id)
+          // Finished streaming while you were on another tab → flag attention.
+          if (id !== activeSessionId) attention.set(id, true)
           onUpdate()
         }, IDLE_MS))
         onUpdate()
       })
     },
   })
+  // A BEL (e.g. Claude Code's permission/notification bell) is a definitive
+  // "needs you" signal — flag it immediately if the tab isn't in view.
+  if (typeof xterm.onBell === "function") {
+    xterm.onBell(() => {
+      if (id !== activeSessionId) { attention.set(id, true); onUpdate() }
+    })
+  }
   // Resume the conversation if it already exists; otherwise start it with our id
   const idArgs = conversationExists(opts.claudeSessionId)
     ? ["--resume", opts.claudeSessionId]
@@ -75,4 +99,5 @@ export function killSession(id: number) {
   clearTimeout(idleTimers.get(id))
   idleTimers.delete(id)
   activity.delete(id)
+  attention.delete(id)
 }

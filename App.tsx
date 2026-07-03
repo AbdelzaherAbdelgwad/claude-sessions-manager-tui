@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { createCliRenderer, LayoutEvents, type BoxRenderable } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import { paintXterm } from "./src/render"
-import { ptySessions, spawnSession, killSession, pinnedToBottom, activity } from "./src/pty"
+import { ptySessions, spawnSession, killSession, pinnedToBottom, activity, attention, setActiveSession } from "./src/pty"
 import type { Mode, Session } from "./src/types"
 import { SessionList } from "./src/components/SessionList"
 import { TerminalView } from "./src/components/TerminalView"
@@ -15,6 +15,7 @@ import { QuitConfirmModal } from "./src/components/QuitConfirmModal"
 import { StartupModal } from "./src/components/StartupModal"
 import { OpenSessionModal } from "./src/components/OpenSessionModal"
 import { loadState, saveState, freshSessionId, loadOtherProjects, takeSession } from "./src/persistence"
+import { gitBranch } from "./src/gitInfo"
 
 // Fail fast with a readable error instead of a blank TUI when claude is absent
 if (!Bun.which("claude")) {
@@ -68,6 +69,8 @@ function App() {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerItems, setPickerItems] = useState<Array<{ cwd: string; session: Session }>>([])
   const [pickerIdx, setPickerIdx] = useState(0)
+  // Per-session git branch (id → branch name), polled from each session's cwd.
+  const [branches, setBranches] = useState<Map<number, string>>(new Map())
 
   const termBoxRef = useRef<BoxRenderable | null>(null)
   const spawnedIds = useRef(new Set<number>())
@@ -86,7 +89,7 @@ function App() {
   useEffect(() => { showStartupRef.current = showStartup }, [showStartup])
   useEffect(() => { pickerItemsRef.current = pickerItems }, [pickerItems])
   useEffect(() => { pickerIdxRef.current = pickerIdx }, [pickerIdx])
-  useEffect(() => { activeIdRef.current = activeId }, [activeId])
+  useEffect(() => { activeIdRef.current = activeId; setActiveSession(activeId) }, [activeId])
   useEffect(() => { modeRef.current = mode }, [mode])
   useEffect(() => { sessionsRef.current = sessions }, [sessions])
   useEffect(() => { highlightedIdxRef.current = highlightedIdx }, [highlightedIdx])
@@ -114,6 +117,26 @@ function App() {
     const t = setTimeout(() => { saveState(sessions, activeId) }, 300)
     return () => clearTimeout(t)
   }, [sessions, activeId])
+
+  // ── Poll each session's git branch (cheap file reads, catches checkouts) ────
+
+  useEffect(() => {
+    const compute = () => {
+      const next = new Map<number, string>()
+      for (const s of sessions) {
+        const b = gitBranch(s.cwd)
+        if (b) next.set(s.id, b)
+      }
+      setBranches(prev => {
+        if (prev.size === next.size && Array.from(next).every(([k, v]) => prev.get(k) === v)) return prev
+        renderer.requestRender()
+        return next
+      })
+    }
+    compute()
+    const t = setInterval(compute, 4000)
+    return () => clearInterval(t)
+  }, [sessions])
 
   // ── Sync PTY dimensions with terminal box ──────────────────────────────────
 
@@ -424,7 +447,8 @@ function App() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
-  const activeName = sessions.find(s => s.id === activeId)?.name ?? ""
+  const activeSession = sessions.find(s => s.id === activeId)
+  const activeName = activeSession?.name ?? ""
   const isInsert = mode === "insert"
 
   return (
@@ -454,6 +478,7 @@ function App() {
             searchQuery={searchQuery}
             searching={searching}
             activeSessions={activity}
+            attention={attention}
             spinnerFrame={spinnerFrame}
           />
         </box>
@@ -468,7 +493,7 @@ function App() {
         />
       </box>
 
-      <StatusBar mode={mode} activeName={activeName} />
+      <StatusBar mode={mode} activeName={activeName} activeCwd={activeSession?.cwd} activeBranch={activeId != null ? branches.get(activeId) : undefined} />
 
       {deleteConfirm !== null && (
         <DeleteConfirmModal
