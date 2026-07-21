@@ -3,6 +3,13 @@ import { RGBA, ansi256IndexToRgb } from "@opentui/core"
 export const DEFAULT_FG = RGBA.defaultForeground()
 export const DEFAULT_BG = RGBA.defaultBackground()
 
+// Concrete fallbacks for the block cursor. The default RGBAs above are
+// sentinels ("use terminal default"), so OpenTUI won't fill a cell background
+// with them — the cursor block would be invisible. When a cursor cell uses
+// default colors, substitute these so the reverse-video block actually paints.
+export const CURSOR_LIGHT = RGBA.fromInts(220, 220, 220)
+export const CURSOR_DARK = RGBA.fromInts(0, 0, 0)
+
 // xterm.js tags each cell's color with a mode flag (bit 24/25/26) telling us
 // how to read the packed color value below it.
 const CM_PALETTE_16 = 0x1000000 // color = index 0–15
