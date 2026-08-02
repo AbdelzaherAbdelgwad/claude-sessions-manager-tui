@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { createCliRenderer, LayoutEvents, type BoxRenderable } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import { paintXterm } from "./src/render"
-import { ptySessions, spawnSession, killSession, pinnedToBottom, activity, waiting, attention, setActiveSession } from "./src/pty"
+import { ptySessions, spawnSession, killSession, pinnedToBottom, activity, waiting, attention, setActiveSession, sessionEnv } from "./src/pty"
 import type { Mode, Session } from "./src/types"
 import type { SessionStatus } from "./src/components/StatusBar"
 import { config, applyTheme, setColor, isHexColor, themeNames } from "./src/config"
@@ -16,6 +16,7 @@ import { RenameModal } from "./src/components/RenameModal"
 import { QuitConfirmModal } from "./src/components/QuitConfirmModal"
 import { StartupModal } from "./src/components/StartupModal"
 import { OpenSessionModal } from "./src/components/OpenSessionModal"
+import { EnvModal } from "./src/components/EnvModal"
 import { ThemeModal } from "./src/components/ThemeModal"
 import { loadState, saveState, freshSessionId, loadOtherProjects, takeSession } from "./src/persistence"
 import { gitBranch } from "./src/gitInfo"
@@ -65,6 +66,12 @@ function App() {
   const [, setTerminalUpdate] = useState(0)
   const [renaming, setRenaming] = useState<number | null>(null)
   const [renameInput, setRenameInput] = useState("")
+  // Env modal (`e`): add a KEY=VALUE env var to the active session, respawn.
+  const [envModal, setEnvModal] = useState<number | null>(null)
+  const [envInput, setEnvInput] = useState("")
+  // Highlighted row in the env var list; -1 = none (typing to add). Arrow keys
+  // move it, Enter on a selected row (with empty input) removes that var.
+  const [envSel, setEnvSel] = useState(-1)
   const [searchQuery, setSearchQuery] = useState("")
   const [searching, setSearching] = useState(false)
   const [spinnerFrame, setSpinnerFrame] = useState(0)
@@ -94,6 +101,9 @@ function App() {
   const showHelpRef = useRef(false)
   const renamingRef = useRef<number | null>(null)
   const renameInputRef = useRef("")
+  const envModalRef = useRef<number | null>(null)
+  const envInputRef = useRef("")
+  const envSelRef = useRef(-1)
   const searchQueryRef = useRef("")
   const searchingRef = useRef(false)
   const showStartupRef = useRef(initialState.restored)
@@ -111,6 +121,9 @@ function App() {
   useEffect(() => { showHelpRef.current = showHelp }, [showHelp])
   useEffect(() => { renamingRef.current = renaming }, [renaming])
   useEffect(() => { renameInputRef.current = renameInput }, [renameInput])
+  useEffect(() => { envModalRef.current = envModal }, [envModal])
+  useEffect(() => { envInputRef.current = envInput }, [envInput])
+  useEffect(() => { envSelRef.current = envSel }, [envSel])
   useEffect(() => { searchQueryRef.current = searchQuery }, [searchQuery])
   useEffect(() => { searchingRef.current = searching }, [searching])
 
@@ -360,6 +373,54 @@ function App() {
       if (seq === "\x1b[1;5A") { scroll(-10, "\x1b[5~"); return true }
       if (seq === "\x1b[1;5B") { scroll(10, "\x1b[6~"); return true }
 
+      if (envModalRef.current !== null) {
+        const id = envModalRef.current
+        const keys = Object.keys(sessionEnv.get(id) ?? {})
+        const respawn = () => {
+          // Respawn so the env change takes effect; --resume keeps the conversation.
+          const box = termBoxRef.current
+          killSession(id)
+          spawnedIds.current.delete(id)
+          if (box && box.width > 0 && box.height > 0) syncSession(id, box.width, box.height)
+        }
+        // Arrow keys walk the existing-var list (only while the add-input is empty).
+        if ((seq === "\x1b[A" || seq === "\x1b[B") && keys.length > 0 && envInputRef.current === "") {
+          const delta = seq === "\x1b[A" ? -1 : 1
+          setEnvSel(i => Math.max(0, Math.min(keys.length - 1, (i < 0 ? 0 : i + delta))))
+          return true
+        }
+        // "r" removes the highlighted var (only when not mid-typing an add).
+        if (seq === "r" && envInputRef.current === "" && envSelRef.current >= 0 && envSelRef.current < keys.length) {
+          const { [keys[envSelRef.current]]: _drop, ...rest } = sessionEnv.get(id) ?? {}
+          sessionEnv.set(id, rest)
+          respawn()
+          setEnvModal(null)
+          setEnvInput("")
+          setEnvSel(-1)
+          return true
+        }
+        if (seq === "\r") {
+          // Enter adds KEY=VALUE.
+          const raw = envInputRef.current.trim()
+          const eq = raw.indexOf("=")
+          if (eq > 0) {
+            const key = raw.slice(0, eq).trim()
+            const val = raw.slice(eq + 1)
+            sessionEnv.set(id, { ...(sessionEnv.get(id) ?? {}), [key]: val })
+            respawn()
+          }
+          setEnvModal(null)
+          setEnvInput("")
+          setEnvSel(-1)
+          return true
+        }
+        if (seq === "\x1b") { setEnvModal(null); setEnvInput(""); setEnvSel(-1); return true }
+        if (seq === "\x7f" || seq === "\b") { setEnvInput(s => s.slice(0, -1)); return true }
+        // Typing switches to add-mode: clear any list selection.
+        if (seq.length === 1 && seq.charCodeAt(0) >= 32) { setEnvSel(-1); setEnvInput(s => s + seq); return true }
+        return true
+      }
+
       if (renamingRef.current !== null) {
         if (seq === "\r") {
           setSessions(prev => prev.map(s => s.id === renamingRef.current ? { ...s, name: renameInputRef.current } : s))
@@ -407,6 +468,7 @@ function App() {
         if (seq === "\r" || seq === " ") { openSession(highlightedIdxRef.current); return true }
         if (seq === "i" || seq === "a") { enterInsert(); return true }
         if (seq === "r") { const s = sessionsRef.current[highlightedIdxRef.current]; if (s) { setRenaming(s.id); setRenameInput(s.name); } return true }
+        if (seq === "e") { setEnvModal(activeIdRef.current); setEnvInput(""); setEnvSel(-1); return true }
         if (seq === "*") { const s = sessionsRef.current[highlightedIdxRef.current]; if (s) toggleFavorite(s.id); return true }
         if (seq === "c") { const s = sessionsRef.current[highlightedIdxRef.current]; if (s) cycleColor(s.id); return true }
         if (seq === "t") { setThemeSel(Math.max(0, themeNames.indexOf(config.theme))); setThemeEditing(false); setThemeEdit(""); setThemeModalOpen(true); return true }
@@ -628,6 +690,8 @@ function App() {
       {searching && <SearchModal query={searchQuery} onQueryChange={setSearchQuery} />}
 
       {renaming !== null && <RenameModal input={renameInput} onInputChange={setRenameInput} />}
+
+      {envModal !== null && <EnvModal input={envInput} vars={sessionEnv.get(envModal) ?? {}} selected={envSel} />}
 
       {quitConfirm && (
         <QuitConfirmModal

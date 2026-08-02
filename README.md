@@ -15,6 +15,7 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - **Color tags** — tag a tab with a color (`c` cycles) to group related sessions visually
 - **Favorites** — star sessions (`*`); they sort to the front
 - **Rename** sessions (`r`) and **search/filter** them (`/`) via modals
+- **Per-session env vars** — press `e` to add (`KEY=VALUE`) a var on the active session, or `↑`/`↓` to pick an existing var and `r` to remove it; `claude` respawns (in-memory only, not persisted)
 - **Per-project session persistence** — tabs (names, favorites, order) are saved per launch directory and restored
 - **Conversation resume** — restored tabs reopen the actual Claude conversation (`claude --resume`)
 - **Startup chooser** — on launch, Resume this directory's sessions or Start new
@@ -113,6 +114,7 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 |-----|--------|
 | `1` – `9` | Jump to session N |
 | `r` | Rename session |
+| `e` | Session env vars — type `KEY=VALUE` to add, or `↑`/`↓` to pick an existing var and `r` to remove it; respawns `claude` (resumes the conversation) |
 | `*` | Star / unstar session (sorts to front) |
 | `c` | Cycle the highlighted session's color tag |
 | `t` | Open the theme menu (pick a preset or set the accent color) |

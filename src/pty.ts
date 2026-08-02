@@ -6,6 +6,9 @@ import { config } from "./config"
 const { Terminal: XTerm } = XTermPkg as any
 
 export const ptySessions = new Map<number, PtySession>()
+// Per-session extra env vars, merged over process.env at spawn. In-memory only
+// (not persisted) — added via the env modal, applied on the next (re)spawn.
+export const sessionEnv = new Map<number, Record<string, string>>()
 export const pinnedToBottom = new Set<number>()
 // True while a session's PTY is actively streaming output (Claude generating,
 // or its TUI spinner still animating). Drives the tab spinner.
@@ -93,7 +96,7 @@ export function spawnSession(id: number, cols: number, rows: number, onUpdate: (
     : ["--session-id", opts.claudeSessionId]
   const proc = Bun.spawn(
     ["claude", ...idArgs, "--settings", '{"tui":"fullscreen"}'],
-    { terminal: pty, cwd: opts.cwd },
+    { terminal: pty, cwd: opts.cwd, env: { ...process.env, ...(sessionEnv.get(id) ?? {}) } },
   )
   const session: PtySession = { xterm, pty, proc, hasData: false }
   ptySessions.set(id, session)

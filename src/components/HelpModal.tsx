@@ -9,6 +9,7 @@ const HELP_LINES = [
   ["Enter / Space", "open session + insert mode"],
   ["i / a", "enter insert mode"],
   ["r", "rename session"],
+  ["e", "session env vars: type KEY=VALUE to add, ↑↓+r to remove (respawns claude)"],
   ["*", "star/unstar session (sorts to front)"],
   ["c", "cycle session color tag"],
   ["t", "theme menu (presets + accent color)"],
