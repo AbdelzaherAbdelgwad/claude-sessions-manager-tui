@@ -90,13 +90,35 @@ export function spawnSession(id: number, cols: number, rows: number, onUpdate: (
   if (typeof xterm.onBell === "function") {
     xterm.onBell(() => markWaiting(id, onUpdate))
   }
+  // xterm.js answers terminal queries (device attributes, cursor position
+  // reports, …) on `onData`. Without this wire-back, anything the child asks
+  // the terminal about gets no reply and it falls back to conservative
+  // defaults. Keyboard input is written to the PTY directly from App.tsx.
+  if (typeof xterm.onData === "function") {
+    xterm.onData((reply: string) => {
+      try { pty.write(reply) } catch { }
+    })
+  }
   // Resume the conversation if it already exists; otherwise start it with our id
   const idArgs = conversationExists(opts.claudeSessionId)
     ? ["--resume", opts.claudeSessionId]
     : ["--session-id", opts.claudeSessionId]
   const proc = Bun.spawn(
     ["claude", ...idArgs, "--settings", '{"tui":"fullscreen"}'],
-    { terminal: pty, cwd: opts.cwd, env: { ...process.env, ...(sessionEnv.get(id) ?? {}) } },
+    {
+      terminal: pty,
+      cwd: opts.cwd,
+      env: {
+        ...process.env,
+        // The emulator on this PTY is xterm.js, not whatever terminal csm was
+        // launched from — passing the outer TERM through (kitty, ghostty, …)
+        // makes the child read terminfo for features xterm.js lacks. It does
+        // do 24-bit color, so keep COLORTERM.
+        TERM: "xterm-256color",
+        COLORTERM: "truecolor",
+        ...(sessionEnv.get(id) ?? {}),
+      },
+    },
   )
   const session: PtySession = { xterm, pty, proc, hasData: false }
   ptySessions.set(id, session)

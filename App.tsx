@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { createCliRenderer, LayoutEvents, type BoxRenderable } from "@opentui/core"
 import { createRoot } from "@opentui/react"
 import { paintXterm } from "./src/render"
+import { setHostPalette } from "./src/colors"
 import { ptySessions, spawnSession, killSession, pinnedToBottom, activity, waiting, attention, setActiveSession, sessionEnv } from "./src/pty"
 import type { Mode, Session } from "./src/types"
 import type { SessionStatus } from "./src/components/StatusBar"
@@ -36,6 +37,18 @@ if (!Bun.which("claude")) {
 // why it works on some machines but not others. We forward raw bytes to the PTY
 // anyway, so legacy encodings are what we want: disable kitty entirely.
 const renderer = await createCliRenderer({ useMouse: true, useKittyKeyboard: false })
+
+// Learn the host terminal's ANSI 0–15 palette (OSC 4) so Claude's basic-color
+// output is repainted in the user's actual theme instead of OpenTUI's built-in
+// VGA table. Fire-and-forget: if the terminal never answers we keep the
+// fallback, and the query must not delay first paint.
+renderer
+  .getPalette({ size: 16, timeout: 400 })
+  .then((colors) => {
+    setHostPalette(colors?.palette)
+    renderer.requestRender()
+  })
+  .catch(() => { })
 
 // Color tags cycled by `c` on the highlighted tab. undefined = no tag.
 const TAG_COLORS: Array<string | undefined> = [undefined, "#FF5555", "#FFB86C", "#F1FA8C", "#50FA7B", "#8BE9FD", "#BD93F9", "#FF79C6"]

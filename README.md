@@ -13,6 +13,7 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - **Status-bar context** — the bottom bar shows the active session's directory, git branch, and live state (`working…` / `waiting for input`)
 - **Configurable** — theme presets, colors, timing thresholds, and display toggles via `~/.claude-sessions-manager/config.json`
 - **Color tags** — tag a tab with a color (`c` cycles) to group related sessions visually
+- **Faithful colors** — Claude's output keeps your terminal's own ANSI palette (queried once via OSC 4) and its text styles (bold, dim, italic, underline, strikethrough), so a session looks like plain `claude` does
 - **Favorites** — star sessions (`*`); they sort to the front
 - **Rename** sessions (`r`) and **search/filter** them (`/`) via modals
 - **Per-session env vars** — press `e` to add (`KEY=VALUE`) a var on the active session, or `↑`/`↓` to pick an existing var and `r` to remove it; `claude` respawns (in-memory only, not persisted)
