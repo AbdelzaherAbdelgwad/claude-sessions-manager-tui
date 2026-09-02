@@ -120,6 +120,7 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 | `*` | Star / unstar session (sorts to front) |
 | `c` | Cycle the highlighted session's color tag (moves the tab into that group) |
 | `z` | Fold / unfold the highlighted tab's group |
+| `Z` | Fold / unfold every group at once |
 | `R` | Rename the highlighted tab's group (empty input clears the name) |
 | `t` | Open the theme menu (pick a preset or set the accent color) |
 | `/` | Search / filter sessions |
@@ -209,11 +210,16 @@ Favorites still come first, and untagged tabs stay as ordinary standalone tabs
 at the end. Tagging a tab moves it into its group immediately and the highlight
 follows it.
 
-Press `z` to **fold** a group down to a single tab:
+Press `z` — or click the `▾` inside the group tab — to **fold** a group down to
+a single tab:
 
 ```
 ╭─ ▸ backend ● 2 ─╮
 ```
+
+`Z`, or the `▾ all` button at the right of the bar next to `+`, folds or unfolds
+**every** group at once. It unfolds them all if any is folded, and folds them all
+once they're all open; its glyph shows which way it will go.
 
 A folded group is one stop for `h` / `l` and for `1`–`9`, and its dot shows the
 loudest status among the tabs it hides — so a session inside it can still turn
@@ -240,6 +246,8 @@ Other interactions:
 - Click any session to activate it
 - Click `+` or press `n` to create a new session
 - Click `✕` or press `d` to delete
+- Click a group's `▾` to fold it, or a folded group tab to unfold it
+- Click `▾ all` / `▸ all` to fold or unfold every group
 - When tabs overflow, click a `‹N` / `N›` chevron to jump to hidden tabs
 
 ## Mouse Support

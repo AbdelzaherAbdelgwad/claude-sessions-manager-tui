@@ -93,6 +93,13 @@ function buildNav(list: Session[], collapsed: Set<string>): NavEntry[] {
   return out
 }
 
+// The distinct color tags in use, in the order their groups appear.
+function groupColors(list: Session[]): string[] {
+  const seen: string[] = []
+  for (const s of list) if (s.color && !seen.includes(s.color)) seen.push(s.color)
+  return seen
+}
+
 // The session an entry addresses: a collapsed group stands in for its members,
 // so keys that need one specific tab fall back to the group's first.
 const entrySession = (e: NavEntry | undefined): Session | undefined =>
@@ -600,18 +607,34 @@ function App() {
     setCollapsed(next)
   }
 
+  // Folding changes the shape of the entry list, so the highlight has to be
+  // re-anchored to the session it was already on.
+  const reanchorHighlight = () => {
+    const anchor = entrySession(navEntriesRef.current[highlightedIdxRef.current])
+    if (anchor) setHighlightedIdx(entryIdxOf(sessionsRef.current, anchor.id))
+  }
+
+  const toggleGroupByColor = (color: string) => {
+    setGroupCollapsed(color, !collapsedRef.current.has(color))
+    reanchorHighlight()
+  }
+
   // Fold/unfold the group the highlight is on — whether that's a member tab or
-  // the folded group's own entry. Keeps the highlight on the same group.
+  // the folded group's own entry.
   const toggleGroupFold = () => {
     const e = navEntriesRef.current[highlightedIdxRef.current]
-    if (!e) return
-    const color = e.kind === "group" ? e.color : e.group
-    if (!color) return
-    const nowCollapsed = e.kind !== "group"
-    setGroupCollapsed(color, nowCollapsed)
-    // The entry list changes shape; re-find where this group landed.
-    const anchor = entrySession(e)
-    if (anchor) setHighlightedIdx(entryIdxOf(sessionsRef.current, anchor.id))
+    const color = e === undefined ? undefined : e.kind === "group" ? e.color : e.group
+    if (color) toggleGroupByColor(color)
+  }
+
+  // Unfold every group, or fold every group once they're all already open.
+  const toggleAllGroups = () => {
+    const colors = groupColors(sessionsRef.current)
+    if (colors.length === 0) return
+    const next = colors.every(c => collapsedRef.current.has(c)) ? new Set<string>() : new Set(colors)
+    collapsedRef.current = next
+    setCollapsed(next)
+    reanchorHighlight()
   }
 
   // Rename the group the highlight sits in — whether that's a member tab or a
@@ -767,6 +790,7 @@ function App() {
         if (seq === "*") { if (hl) toggleFavorite(hl.id); return true }
         if (seq === "c") { if (hl) cycleColor(hl.id); return true }
         if (seq === "z") { toggleGroupFold(); return true }
+        if (seq === "Z") { toggleAllGroups(); return true }
         if (seq === "R") { openGroupRename(); return true }
         if (seq === "s") { toggleSplit(); return true }
         if (seq === "S") { cycleSplitLayout(); return true }
@@ -919,6 +943,7 @@ function App() {
   const splitSession = splitId === null ? undefined : sessions.find(s => s.id === splitId)
   const nameOf = (id: number | null) => (id === null ? "" : sessions.find(s => s.id === id)?.name ?? "")
   // One filtered list drives both the tab bar and NORMAL-mode navigation.
+  const sessionGroupColors = groupColors(sessions)
   const navEntries = buildNav(filterSessions(sessions, searchQuery), collapsed)
   navEntriesRef.current = navEntries
 
@@ -943,6 +968,10 @@ function App() {
             highlightedIdx={highlightedIdx}
             isInsert={isInsert}
             onSelect={(i) => { setHighlightedIdx(i); openSession(i) }}
+            onToggleGroup={toggleGroupByColor}
+            onToggleAll={toggleAllGroups}
+            groupCount={sessionGroupColors.length}
+            allCollapsed={sessionGroupColors.length > 0 && sessionGroupColors.every(c => collapsed.has(c))}
             onDelete={id => setDeleteConfirm(id)}
             onAdd={addSession}
             renaming={renaming}

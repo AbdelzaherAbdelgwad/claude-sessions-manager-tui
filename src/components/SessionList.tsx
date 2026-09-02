@@ -9,6 +9,13 @@ interface Props {
   onSelect: (index: number) => void
   onDelete: (id: number) => void
   onAdd: () => void
+  // Fold/unfold one group by its tag color, and fold/unfold every group at once.
+  onToggleGroup?: (color: string) => void
+  onToggleAll?: () => void
+  // How many groups exist, and whether all of them are currently folded — drives
+  // the all-groups button's presence and its glyph.
+  groupCount?: number
+  allCollapsed?: boolean
   renaming?: number | null
   renameInput?: string
   searchQuery?: string
@@ -35,8 +42,9 @@ function inkOn(hex: string): string {
   return 0.299 * r + 0.587 * g + 0.114 * b > 140 ? "#101018" : "#FFFFFF"
 }
 
-// Chrome a group container adds around its members: border(2) + paddingX(2).
-const GROUP_CHROME_W = 4
+// Chrome a group container adds around its members:
+// border(2) + paddingX(2) + fold button(2).
+const GROUP_CHROME_W = 6
 
 const entrySessions = (e: NavEntry): Session[] => (e.kind === "session" ? [e.session] : e.sessions)
 
@@ -58,13 +66,13 @@ function entryWidth(e: NavEntry, multi: boolean, splitId: number | null | undefi
 // Pick a contiguous run of entries that fits `maxWidth`, always keeping the
 // highlighted one visible and expanding outward so it stays centred. Returns
 // [start, end) into `entries`. Reserves room for "+" and both chevrons.
-function visibleWindow(widths: number[], focus: number, maxWidth: number): [number, number] {
+function visibleWindow(widths: number[], focus: number, maxWidth: number, extraReserve: number): [number, number] {
   const n = widths.length
   if (n === 0) return [0, 0]
   if (!maxWidth || maxWidth <= 0) return [0, n]
   const total = widths.reduce((a, w) => a + w, 0)
   if (total <= maxWidth - 6) return [0, n] // everything fits, no chevrons needed
-  const budget = maxWidth - 4 /*nav padding*/ - 5 /*+ button*/ - 12 /*two chevrons*/
+  const budget = maxWidth - 4 /*nav padding*/ - 5 /*+ button*/ - extraReserve - 12 /*two chevrons*/
   const f = Math.max(0, Math.min(focus, n - 1))
   let start = f, end = f + 1
   let used = widths[f]
@@ -80,14 +88,16 @@ function visibleWindow(widths: number[], focus: number, maxWidth: number): [numb
   return [start, end]
 }
 
-export function SessionList({ entries, activeId, highlightedIdx, isInsert, onSelect, onDelete, onAdd, activeSessions, attention, waiting, spinnerFrame = 0, maxWidth, splitId }: Props) {
+export function SessionList({ entries, activeId, highlightedIdx, isInsert, onSelect, onDelete, onAdd, onToggleGroup, onToggleAll, groupCount = 0, allCollapsed = false, activeSessions, attention, waiting, spinnerFrame = 0, maxWidth, splitId }: Props) {
   const c = config.colors
   const total = entries.reduce((a, e) => a + entrySessions(e).length, 0)
   const multi = total > 1
 
   const widths = entries.map((e, i) =>
     entryWidth(e, multi, splitId, e.kind === "session" && (i === 0 || (entries[i - 1] as any).group !== e.group)))
-  const [start, end] = visibleWindow(widths, highlightedIdx, maxWidth ?? 0)
+  // The all-groups button only exists when there are groups; reserve its width.
+  const showAllButton = groupCount > 0 && !!onToggleAll
+  const [start, end] = visibleWindow(widths, highlightedIdx, maxWidth ?? 0, showAllButton ? 8 : 0)
   const hiddenLeft = start
   const hiddenRight = entries.length - end
 
@@ -212,6 +222,12 @@ export function SessionList({ entries, activeId, highlightedIdx, isInsert, onSel
           borderColor: hasActive ? c.active : color,
         }}
       >
+        <text
+          onMouseDown={e => { e.stopPropagation(); onToggleGroup?.(color) }}
+          style={{ fg: color }}
+        >
+          ▾
+        </text>
         {members}
       </box>,
     )
@@ -228,6 +244,15 @@ export function SessionList({ entries, activeId, highlightedIdx, isInsert, onSel
       {hiddenRight > 0 && (
         <box onMouseDown={() => onSelect(end)} style={{ flexShrink: 0, paddingX: 1, height: "100%", border: true, borderStyle: "rounded", borderColor: c.border, flexDirection: "row" }}>
           <text style={{ fg: c.name }}>{hiddenRight}›</text>
+        </box>
+      )}
+      {showAllButton && (
+        <box
+          onMouseDown={onToggleAll}
+          style={{ paddingX: 1, flexShrink: 0, height: "100%", border: true, borderStyle: "rounded", borderColor: c.border, flexDirection: "row" }}
+        >
+          <text style={{ fg: c.name }}>{allCollapsed ? "▸" : "▾"}</text>
+          <text style={{ fg: "#555555", marginLeft: 1 }}>all</text>
         </box>
       )}
       <box onMouseDown={onAdd} style={{ paddingX: 1, flexShrink: 0, height: "100%", border: true, borderStyle: "rounded", borderColor: c.border, flexDirection: "row" }}>
