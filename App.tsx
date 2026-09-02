@@ -24,6 +24,8 @@ import {
   repoRoot, branchExists, worktreePath, addWorktree, removeWorktree,
 } from "./src/gitInfo"
 import { WorktreeModal } from "./src/components/WorktreeModal"
+import { ComposeModal } from "./src/components/ComposeModal"
+import { wordStartBefore, caretVertical } from "./src/compose"
 import { fuzzyScoreFields } from "./src/fuzzy"
 import { DiffPanel } from "./src/components/DiffPanel"
 
@@ -176,6 +178,11 @@ function App() {
   // Transient status-bar message (currently only git's refusal to remove a
   // dirty worktree, which has nowhere else to appear).
   const [statusNotice, setStatusNotice] = useState<string | null>(null)
+  // Compose buffer (`p`): write a long prompt properly, then send it as one
+  // paste. Drafts are kept per session so closing the modal doesn't lose one.
+  const [composeOpen, setComposeOpen] = useState(false)
+  const [composeText, setComposeText] = useState("")
+  const [composeCaret, setComposeCaret] = useState(0)
   // Terminal width in columns, tracked so the tab bar can window on overflow.
   const [termWidth, setTermWidth] = useState(renderer.terminalWidth)
   const [termHeight, setTermHeight] = useState(renderer.terminalHeight)
@@ -234,6 +241,11 @@ function App() {
   const worktreeInputRef = useRef("")
   const worktreeRootRef = useRef<string | null>(null)
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const composeOpenRef = useRef(false)
+  const composeTextRef = useRef("")
+  const composeCaretRef = useRef(0)
+  const composeWidthRef = useRef(60)
+  const drafts = useRef(new Map<number, string>())
   // The nav entries the tab bar shows, mirrored for the input-handler closure.
   // highlightedIdx indexes THIS, not the session list — a collapsed group is one
   // entry covering several sessions. Refreshed on every render.
@@ -257,6 +269,9 @@ function App() {
   useEffect(() => { worktreeOpenRef.current = worktreeOpen }, [worktreeOpen])
   useEffect(() => { worktreeInputRef.current = worktreeInput }, [worktreeInput])
   useEffect(() => { worktreeRootRef.current = worktreeRoot }, [worktreeRoot])
+  useEffect(() => { composeOpenRef.current = composeOpen }, [composeOpen])
+  useEffect(() => { composeTextRef.current = composeText }, [composeText])
+  useEffect(() => { composeCaretRef.current = composeCaret }, [composeCaret])
   useEffect(() => { groupRenamingRef.current = groupRenaming }, [groupRenaming])
   useEffect(() => { groupRenameInputRef.current = groupRenameInput }, [groupRenameInput])
   // Both panes of a split are on screen, so neither may raise an attention flag.
@@ -857,6 +872,55 @@ function App() {
     setGroupRenameInput(idx > 0 ? config.groups[String(idx)] ?? "" : "")
   }
 
+  // ── Compose buffer ─────────────────────────────────────────────────────────
+
+  // INSERT mode types straight into Claude's own line editor inside the PTY,
+  // which is fine for a sentence and painful for a paragraph — there is no way
+  // to revise before it is submitted. This writes the prompt here first.
+  const openCompose = () => {
+    const draft = drafts.current.get(activeIdRef.current) ?? ""
+    setComposeText(draft)
+    composeTextRef.current = draft
+    setComposeCaret(draft.length)
+    composeCaretRef.current = draft.length
+    setComposeOpen(true)
+  }
+
+  const closeCompose = (keepDraft: boolean) => {
+    const id = activeIdRef.current
+    if (keepDraft && composeTextRef.current) drafts.current.set(id, composeTextRef.current)
+    else drafts.current.delete(id)
+    setComposeOpen(false)
+  }
+
+  // Replace the buffer and put the caret somewhere, keeping both refs in step
+  // so the once-registered input handler sees the change immediately.
+  const setCompose = (text: string, caret: number) => {
+    const c = Math.max(0, Math.min(caret, text.length))
+    setComposeText(text); composeTextRef.current = text
+    setComposeCaret(c); composeCaretRef.current = c
+  }
+
+  const insertCompose = (chunk: string) => {
+    const t = composeTextRef.current
+    const c = composeCaretRef.current
+    setCompose(t.slice(0, c) + chunk + t.slice(c), c + chunk.length)
+  }
+
+  // Send as one bracketed paste, then Enter. Claude Code treats the paste as a
+  // single input, so embedded newlines don't submit the prompt line by line —
+  // the same path the app already uses for terminal pastes.
+  const sendCompose = () => {
+    const text = composeTextRef.current
+    const ps = ptySessions.get(activeIdRef.current)
+    if (!text.trim() || !ps || ps.exited) { closeCompose(true); return }
+    ps.pty.write("\x1b[200~" + text + "\x1b[201~")
+    ps.pty.write("\r")
+    drafts.current.delete(activeIdRef.current)
+    setCompose("", 0)
+    setComposeOpen(false)
+  }
+
   // ── Worktree sessions ──────────────────────────────────────────────────────
 
   // `w` on a session inside a repo: name a branch, get a git worktree for it
@@ -960,6 +1024,38 @@ function App() {
 
   useEffect(() => {
     const handler = (seq: string) => {
+      // First: while the compose buffer is open every key is editing input,
+      // including Ctrl+C/Ctrl+D and the scroll keys the global bindings claim.
+      if (composeOpenRef.current) {
+        const t = composeTextRef.current
+        const c = composeCaretRef.current
+        const w = composeWidthRef.current
+        if (seq === "\x13") { sendCompose(); return true }                       // Ctrl+S
+        if (seq === "\x1b") { closeCompose(true); return true }
+        if (seq === "\x03") { closeCompose(true); return true }                  // Ctrl+C
+        if (seq === "\x04") { sendCompose(); return true }                       // Ctrl+D
+        if (seq === "\x15") { setCompose("", 0); return true }                   // Ctrl+U
+        if (seq === "\x17") { setCompose(t.slice(0, wordStartBefore(t, c)) + t.slice(c), wordStartBefore(t, c)); return true } // Ctrl+W
+        if (seq === "\x01") { setCompose(t, t.lastIndexOf("\n", Math.max(0, c - 1)) + 1); return true } // Ctrl+A
+        if (seq === "\x05") {                                                    // Ctrl+E
+          const nl = t.indexOf("\n", c)
+          setCompose(t, nl < 0 ? t.length : nl)
+          return true
+        }
+        if (seq === "\r" || seq === "\n") { insertCompose("\n"); return true }
+        if (seq === "\x7f" || seq === "\b") { if (c > 0) setCompose(t.slice(0, c - 1) + t.slice(c), c - 1); return true }
+        if (seq === "\x1b[3~") { if (c < t.length) setCompose(t.slice(0, c) + t.slice(c + 1), c); return true }
+        if (seq === "\x1b[D") { setCompose(t, c - 1); return true }
+        if (seq === "\x1b[C") { setCompose(t, c + 1); return true }
+        if (seq === "\x1b[A") { setCompose(t, caretVertical(t, c, w, -1)); return true }
+        if (seq === "\x1b[B") { setCompose(t, caretVertical(t, c, w, 1)); return true }
+        if (seq === "\x1b[H") { setCompose(t, 0); return true }
+        if (seq === "\x1b[F") { setCompose(t, t.length); return true }
+        // Printable input, including multi-byte characters.
+        if (!seq.startsWith("\x1b") && seq.charCodeAt(0) >= 32) { insertCompose(seq); return true }
+        return true
+      }
+
       if (seq === "\x04") { setQuitConfirm(true); return true }
       if (showHelpRef.current && seq === "\x1b") { setShowHelp(false); return true }
       if (seq === "\x03") { setDeleteConfirm(activeIdRef.current); return true }
@@ -1115,6 +1211,7 @@ function App() {
         }
         if (seq === "R") { openGroupRename(); return true }
         if (seq === "w") { openWorktreeModal(); return true }
+        if (seq === "p") { openCompose(); return true }
         if (seq === "s") { toggleSplit(); return true }
         if (seq === "S") { cycleSplitLayout(); return true }
         if (seq === "\t" && splitIdRef.current !== null) { focusOtherPane(); return true }
@@ -1272,6 +1369,7 @@ function App() {
     const onPaste = (e: any) => {
       const text = typeof e?.text === "string" ? e.text : new TextDecoder().decode(e?.bytes ?? new Uint8Array())
       if (!text) return
+      if (composeOpenRef.current) { insertCompose(text); renderer.requestRender(); return }
       if (themeEditingRef.current) {
         const hex = text.replace(/[^0-9a-fA-F#]/g, "")
         if (hex) { setThemeEdit(s => (s + hex).slice(0, 7)); renderer.requestRender() }
@@ -1311,6 +1409,9 @@ function App() {
   const nameOf = (id: number | null) => (id === null ? "" : sessions.find(s => s.id === id)?.name ?? "")
   // Keep the panel from eating a narrow terminal: at most 40% of the width.
   const diffWidth = Math.max(24, Math.min(46, Math.floor(termWidth * 0.4)))
+  // Modal is 80% wide with a border and padding either side.
+  const composeWidth = Math.max(20, Math.floor(termWidth * 0.8) - 6)
+  composeWidthRef.current = composeWidth
   // One filtered list drives both the tab bar and NORMAL-mode navigation.
   const sessionGroupColors = groupColors(sessions)
 
@@ -1485,6 +1586,17 @@ function App() {
       )}
 
       {renaming !== null && <RenameModal input={renameInput} onInputChange={setRenameInput} />}
+
+      {composeOpen && (
+        <ComposeModal
+          text={composeText}
+          caret={composeCaret}
+          sessionName={activeName}
+          width={composeWidth}
+          // The legend now takes three rows, so the text area gets fewer.
+          rows={Math.max(3, Math.min(16, termHeight - 15))}
+        />
+      )}
 
       {worktreeOpen && (
         <WorktreeModal

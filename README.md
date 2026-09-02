@@ -29,6 +29,7 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - **Crash recovery** — if a tab's `claude` process dies, a banner appears and Enter restarts it, resuming the conversation
 - **Confirm-on-quit** — Ctrl+D prompts before closing all sessions
 - **Direct passthrough** — in INSERT mode, all keys (including `/commands`, arrows, Tab) go straight to Claude Code
+- **Compose buffer** — `p` opens a real editor for long prompts: newlines, cursor movement, word delete, and a per-session draft that survives closing it; `Ctrl+S` sends the whole thing as one paste
 
 ## Requirements
 
@@ -107,6 +108,7 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 | `Enter` / `Space` | Open highlighted session |
 | `H` / `L` | Move highlighted session left / right |
 | `i` / `a` | Enter INSERT mode |
+| `p` | Compose a prompt in an editor and send it (`Ctrl+S`) |
 | `n` | New session |
 | `w` | New session in a fresh git worktree (prompts for a branch) |
 | `d` | Delete highlighted session (with confirmation) |
@@ -184,6 +186,35 @@ Space to page, `g`/`G` for top/bottom) and filters:
 - `Enter` keeps the filter and returns to scrolling; `Esc` while typing clears it
 - with a filter applied, `Esc` clears it first and only closes the modal on the second press
 - `?` or `q` closes at any time
+
+## Compose Buffer
+
+INSERT mode forwards keystrokes into Claude's own line editor inside the PTY.
+That is fine for a sentence and awkward for a paragraph — there is no room to
+revise before it is submitted. `p` opens a buffer to write in first:
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Newline (it does **not** send) |
+| `Ctrl+S` or `Ctrl+D` | Send to the active session |
+| `←` `→` `↑` `↓` | Move the caret (`↑`/`↓` move by display row, so wrapping is respected) |
+| `Ctrl+A` / `Ctrl+E` | Start / end of line |
+| `Home` / `End` | Start / end of the buffer |
+| `Ctrl+W` | Delete the previous word |
+| `Ctrl+U` | Clear the buffer |
+| `Backspace` / `Del` | Delete before / at the caret |
+| `Esc` or `Ctrl+C` | Close, keeping the draft |
+
+Text wraps at the modal width, breaking on spaces and hard-breaking words too
+long to fit; the view scrolls to follow the caret. Pasting goes into the buffer.
+
+Sending writes the whole text as a single bracketed paste followed by Enter, so
+embedded newlines reach Claude as one prompt rather than submitting it line by
+line.
+
+**Drafts are per session.** Closing with `Esc` keeps what you wrote and `p`
+brings it back, so you can start a prompt, go look at another tab, and come
+back to it. Sending clears the draft.
 
 ## Modes
 

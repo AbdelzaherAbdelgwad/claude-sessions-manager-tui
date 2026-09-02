@@ -8,6 +8,7 @@ const HELP_LINES = [
   ["1-9", "jump to session 1-9"],
   ["Enter / Space", "open session + insert mode"],
   ["i / a", "enter insert mode"],
+  ["p", "compose a prompt in an editor, Ctrl+S to send it"],
   ["r", "rename session"],
   ["e", "session env vars: type KEY=VALUE to add, ↑↓+r to remove (respawns claude)"],
   ["*", "star/unstar session (sorts to front)"],
