@@ -32,7 +32,7 @@ const HELP_LINES = [
   ["Ctrl+C", "delete session (confirm)"],
   ["Ctrl+D", "quit"],
   ["m", "toggle mouse (off = native terminal select)"],
-  ["?", "toggle this help"],
+  ["?", "toggle this help (/ filters it, j/k scrolls)"],
 ]
 
 // Tab status markers, so the dots/spinner in the tab bar are legible.
@@ -63,44 +63,82 @@ type Row =
   | { kind: "pair"; left: string; leftColor: string; right: string; rightColor: string }
   | { kind: "text"; text: string; color: string }
 
-// One flat row list, so the modal can window it by height instead of running
-// off the bottom of the screen.
-function buildRows(): Row[] {
-  const rows: Row[] = [{ kind: "head", text: "Keybindings" }]
-  for (const [key, desc] of HELP_LINES) {
-    rows.push({ kind: "pair", left: key, leftColor: "#00BFFF", right: desc, rightColor: "#cccccc" })
+interface Section { head: string; rows: Row[] }
+
+// Content as sections, so filtering can drop a heading whose rows all went away
+// while keeping the ones that still have something under them.
+const SECTIONS: Section[] = [
+  {
+    head: "Keybindings",
+    rows: HELP_LINES.map(([key, desc]) => ({
+      kind: "pair", left: key, leftColor: "#00BFFF", right: desc, rightColor: "#cccccc",
+    })),
+  },
+  {
+    head: "Tab markers",
+    rows: LEGEND.map(([glyph, color, desc]) => ({
+      kind: "pair", left: `  ${glyph}`, leftColor: color, right: desc, rightColor: "#cccccc",
+    })),
+  },
+  {
+    head: "Config file",
+    rows: [
+      { kind: "text", text: `Edit ${DISPLAY_PATH} to customise csm.`, color: "#cccccc" },
+      { kind: "text", text: "Created with defaults on first run; restart to apply changes.", color: "#888888" },
+      ...CONFIG_LINES.map(([section, desc]): Row => ({
+        kind: "pair", left: `  ${section}`, leftColor: "#6a9955", right: desc, rightColor: "#999999",
+      })),
+    ],
+  },
+]
+
+const rowText = (r: Row): string =>
+  r.kind === "pair" ? `${r.left} ${r.right}` : r.kind === "text" ? r.text : r.text
+
+// Flat, windowable row list for a query. Empty query returns everything.
+export function helpRows(query: string): Row[] {
+  const q = query.trim().toLowerCase()
+  const out: Row[] = []
+  for (const section of SECTIONS) {
+    const rows = q ? section.rows.filter(r => rowText(r).toLowerCase().includes(q)) : section.rows
+    if (rows.length === 0) continue
+    out.push({ kind: "head", text: section.head })
+    out.push(...rows)
   }
-  rows.push({ kind: "head", text: "Tab markers" })
-  for (const [glyph, color, desc] of LEGEND) {
-    rows.push({ kind: "pair", left: `  ${glyph}`, leftColor: color, right: desc, rightColor: "#cccccc" })
-  }
-  rows.push({ kind: "head", text: "Config file" })
-  rows.push({ kind: "text", text: `Edit ${DISPLAY_PATH} to customise csm.`, color: "#cccccc" })
-  rows.push({ kind: "text", text: "Created with defaults on first run; restart to apply changes.", color: "#888888" })
-  for (const [section, desc] of CONFIG_LINES) {
-    rows.push({ kind: "pair", left: `  ${section}`, leftColor: "#6a9955", right: desc, rightColor: "#999999" })
-  }
-  return rows
+  return out
 }
 
-const ROWS = buildRows()
-export const HELP_ROW_COUNT = ROWS.length
+export const helpRowCount = (query: string): number => helpRows(query).length
 
 interface Props {
   // First row to draw, and how many fit. App clamps the offset against these.
   scroll?: number
   maxRows?: number
+  // Filter text, and whether keystrokes are currently going into it.
+  query?: string
+  searching?: boolean
 }
 
-export function HelpModal({ scroll = 0, maxRows = ROWS.length }: Props) {
+export function HelpModal({ scroll = 0, maxRows = 20, query = "", searching = false }: Props) {
+  const rows = helpRows(query)
   const visible = Math.max(1, maxRows)
-  const top = Math.max(0, Math.min(scroll, Math.max(0, ROWS.length - visible)))
-  const slice = ROWS.slice(top, top + visible)
+  const top = Math.max(0, Math.min(scroll, Math.max(0, rows.length - visible)))
+  const slice = rows.slice(top, top + visible)
   const above = top
-  const below = Math.max(0, ROWS.length - top - visible)
+  const below = Math.max(0, rows.length - top - visible)
   return (
     <box title="Help" style={{ position: "absolute", top: 1, left: "20%", width: "60%", border: true, borderStyle: "rounded", borderColor: "#00BFFF", padding: 2, flexDirection: "column", gap: 0, backgroundColor: "#111111" }}>
+      <box style={{ flexDirection: "row", width: "100%" }}>
+        <text style={{ fg: searching ? "#00BFFF" : "#555555" }}>/</text>
+        <text style={{ fg: query ? "#FFFFFF" : "#555555" }}>
+          {query || (searching ? "" : " press / to filter")}
+        </text>
+        {searching && <text style={{ fg: "#00BFFF" }}>▏</text>}
+        {!!query && <text style={{ fg: "#555555" }}>{`  ${rows.length} match${rows.length === 1 ? "" : "es"}`}</text>}
+      </box>
+
       <text style={{ fg: "#555555" }}>{above > 0 ? `↑ ${above} more` : " "}</text>
+      {rows.length === 0 && <text style={{ fg: "#888888" }}>no match</text>}
       {slice.map((row, i) => {
         if (row.kind === "head") return <text key={i} style={{ fg: "#FFA500" }}>{row.text}</text>
         if (row.kind === "text") return <text key={i} style={{ fg: row.color }}>{row.text}</text>
@@ -112,7 +150,11 @@ export function HelpModal({ scroll = 0, maxRows = ROWS.length }: Props) {
         )
       })}
       <text style={{ fg: "#555555" }}>{below > 0 ? `↓ ${below} more` : " "}</text>
-      <text style={{ fg: "#555555", marginTop: 1 }}>j/k or ↑/↓ scroll · PgUp/PgDn page · ? or Esc to close</text>
+      <text style={{ fg: "#555555", marginTop: 1 }}>
+        {searching
+          ? "type to filter · Enter to keep it · Esc to clear"
+          : "/ filter · j/k or ↑/↓ scroll · PgUp/PgDn page · ? or Esc to close"}
+      </text>
     </box>
   )
 }

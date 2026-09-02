@@ -11,7 +11,7 @@ import { SessionList } from "./src/components/SessionList"
 import { TerminalView } from "./src/components/TerminalView"
 import { StatusBar } from "./src/components/StatusBar"
 import { DeleteConfirmModal } from "./src/components/DeleteConfirmModal"
-import { HelpModal, HELP_ROW_COUNT } from "./src/components/HelpModal"
+import { HelpModal, helpRowCount } from "./src/components/HelpModal"
 import { SearchModal } from "./src/components/SearchModal"
 import { RenameModal } from "./src/components/RenameModal"
 import { QuitConfirmModal } from "./src/components/QuitConfirmModal"
@@ -166,11 +166,13 @@ function App() {
   // Terminal width in columns, tracked so the tab bar can window on overflow.
   const [termWidth, setTermWidth] = useState(renderer.terminalWidth)
   const [termHeight, setTermHeight] = useState(renderer.terminalHeight)
-  // First visible row of the help modal's content.
+  // First visible row of the help modal's content, plus its filter.
   const [helpScroll, setHelpScroll] = useState(0)
-  // Rows of help content that fit: screen minus the modal's own chrome
-  // (top offset, border, padding, the two scroll hints and the footer).
-  const helpRows = Math.max(4, termHeight - 12)
+  const [helpQuery, setHelpQuery] = useState("")
+  const [helpSearching, setHelpSearching] = useState(false)
+  // Rows of help content that fit: screen minus the modal's own chrome (top
+  // offset, border, padding, the filter line, the two scroll hints, the footer).
+  const helpRows = Math.max(4, termHeight - 13)
   // Theme modal (`t`): preset selection + a hex input for the accent color.
   const [themeModalOpen, setThemeModalOpen] = useState(false)
   const [themeSel, setThemeSel] = useState(0)
@@ -910,7 +912,7 @@ function App() {
         if (seq === "o") { openPicker(); return true }
         if (seq === "d") { setDeleteConfirm(hl?.id ?? null); return true }
         if (seq === "m") { const next = !renderer.useMouse; renderer.useMouse = next; setMouseEnabled(next); return true }
-        if (seq === "?") { setShowHelp(v => { if (!v) setHelpScroll(0); return !v }); return true }
+        if (seq === "?") { setShowHelp(v => { if (!v) { setHelpScroll(0); setHelpQuery(""); setHelpSearching(false) } return !v }); return true }
         if ("123456789".includes(seq)) { const idx = parseInt(seq) - 1; if (idx < len) { setHighlightedIdx(idx); openSession(idx); } return true }
         if (seq === "\x1b") { ptySessions.get(activeIdRef.current)?.pty.write(seq); return true }
         if (seq.startsWith("\x1b[")) { ptySessions.get(activeIdRef.current)?.pty.write(seq); return true }
@@ -957,21 +959,33 @@ function App() {
   // while open and prepended, so it wins over the PgUp/PgDn terminal scroll.
   useEffect(() => {
     if (!showHelp) return
-    const max = Math.max(0, HELP_ROW_COUNT - helpRows)
+    const max = Math.max(0, helpRowCount(helpQuery) - helpRows)
     const move = (d: number) => setHelpScroll(v => Math.max(0, Math.min(max, v + d)))
     const handler = (seq: string) => {
+      // Typing into the filter: every printable key is text, so the nav keys
+      // below are unreachable until Enter or Esc leaves this mode.
+      if (helpSearching) {
+        if (seq === "\r") { setHelpSearching(false); return true }
+        if (seq === "\x1b") { setHelpSearching(false); setHelpQuery(""); setHelpScroll(0); return true }
+        if (seq === "\x7f" || seq === "\b") { setHelpQuery(q => q.slice(0, -1)); setHelpScroll(0); return true }
+        if (seq.length === 1 && seq.charCodeAt(0) >= 32) { setHelpQuery(q => q + seq); setHelpScroll(0); return true }
+        return true
+      }
+      if (seq === "/") { setHelpSearching(true); return true }
       if (seq === "j" || seq === "\x1b[B") { move(1); return true }
       if (seq === "k" || seq === "\x1b[A") { move(-1); return true }
       if (seq === "\x1b[6~" || seq === "\x1b[1;5B" || seq === " ") { move(helpRows); return true }
       if (seq === "\x1b[5~" || seq === "\x1b[1;5A") { move(-helpRows); return true }
       if (seq === "g") { setHelpScroll(0); return true }
       if (seq === "G") { setHelpScroll(max); return true }
+      // Esc clears an active filter first, and only closes once there is none.
+      if (seq === "\x1b" && helpQuery) { setHelpQuery(""); setHelpScroll(0); return true }
       if (seq === "?" || seq === "\x1b" || seq === "q") { setShowHelp(false); return true }
       return true // swallow everything else while the modal is up
     }
     renderer.prependInputHandler(handler)
     return () => renderer.removeInputHandler(handler)
-  }, [showHelp, helpRows])
+  }, [showHelp, helpRows, helpSearching, helpQuery])
 
   useEffect(() => {
     if (deleteConfirm === null) return
@@ -1186,7 +1200,7 @@ function App() {
         />
       )}
 
-      {showHelp && <HelpModal scroll={helpScroll} maxRows={helpRows} />}
+      {showHelp && <HelpModal scroll={helpScroll} maxRows={helpRows} query={helpQuery} searching={helpSearching} />}
 
       {searching && <SearchModal query={searchQuery} onQueryChange={setSearchQuery} />}
 

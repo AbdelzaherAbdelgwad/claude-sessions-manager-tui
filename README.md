@@ -168,8 +168,18 @@ you're watching it.
 
 | Key | Action |
 |-----|--------|
-| `?` | Toggle keybindings help (`j`/`k` or `↑`/`↓` to scroll, PgUp/PgDn to page, Esc to close) |
+| `?` | Toggle keybindings help (`/` to filter, `j`/`k` or `↑`/`↓` to scroll, PgUp/PgDn to page, Esc to close) |
 | `Esc` | Forward Escape to Claude Code (dismiss dialogs) |
+
+### Help modal
+
+`?` opens the keybinding reference. It scrolls (`j`/`k` or arrows, PgUp/PgDn or
+Space to page, `g`/`G` for top/bottom) and filters:
+
+- `/` starts typing a filter; it matches the key column and the description, case-insensitively, and drops any section left with nothing in it
+- `Enter` keeps the filter and returns to scrolling; `Esc` while typing clears it
+- with a filter applied, `Esc` clears it first and only closes the modal on the second press
+- `?` or `q` closes at any time
 
 ## Modes
 
