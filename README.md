@@ -175,17 +175,15 @@ you're watching it.
 
 ## Session List
 
-Selection is a solid fill, so it stays obvious even for tabs nested inside a
-group (which have no border of their own):
+A `▶` marks wherever the keyboard cursor is, so "cursor on the active tab" reads
+differently from "active tab" when the two coincide. The cursor cell is always
+reserved, so moving the highlight never reflows the bar, and in INSERT mode the
+cursor disappears.
 
-- the **active** tab — the session showing in the pane — is filled with the accent color
-- the **keyboard-highlighted** tab is filled with the highlight color
-- a `▶` marks wherever the keyboard cursor is, so "cursor on the active tab" still reads differently from "active tab"
+Beyond that, selection is drawn to suit the tab:
 
-Text on a filled tab flips to a contrasting ink automatically, so custom accent
-colors stay readable. The cursor cell is always reserved, so moving the highlight
-never reflows the bar. In INSERT mode the cursor disappears and only the active
-fill remains.
+- a **standalone tab** (and a folded group tab) has its own border three rows tall, so its border and name take the accent color when active, the highlight color when the cursor is on it
+- a **tab nested in a group** has no border of its own, so it gets a solid fill instead — accent when active, highlight under the cursor, with the text flipped to a contrasting ink so custom accent colors stay readable
 
 Each tab carries a status marker:
 

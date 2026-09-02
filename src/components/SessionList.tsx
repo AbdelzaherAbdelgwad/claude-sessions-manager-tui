@@ -122,12 +122,17 @@ export function SessionList({ entries, activeId, highlightedIdx, isInsert, onSel
     const inSplit = s.id === splitId
     const highlighted = i === highlightedIdx && !isInsert
     const m = marks(s, active)
-    // Group members are borderless — the container owns the frame — so state has
-    // to read from the fill. Solid accent for the tab you're viewing, solid
-    // highlight for the keyboard cursor, and a ▶ marker so "cursor on the active
-    // tab" stays distinct from "active tab" when the two coincide.
-    const fill = active ? c.active : highlighted ? c.highlight : inSplit ? "#1a1a2e" : undefined
-    const ink = fill && fill !== "#1a1a2e" ? inkOn(fill) : undefined
+    // Group members are borderless — the container owns the frame — so their
+    // state has to read from a solid fill. A standalone tab has its own border
+    // and is three rows tall, where the same fill would be a slab of accent, so
+    // it keeps border-coloured state and just a tinted background. Either way a
+    // ▶ marks the cursor, keeping "cursor on the active tab" distinct from
+    // "active tab" when the two coincide.
+    const fill = nested
+      ? (active ? c.active : highlighted ? c.highlight : inSplit ? "#1a1a2e" : undefined)
+      : (active || inSplit ? "#1a1a2e" : highlighted ? "#252525" : undefined)
+    const ink = nested && fill && fill !== "#1a1a2e" ? inkOn(fill) : undefined
+    const accent = active ? c.active : m.needsAttention ? c.attention : highlighted ? c.highlight : c.name
     return (
       <box
         key={s.id}
@@ -148,11 +153,11 @@ export function SessionList({ entries, activeId, highlightedIdx, isInsert, onSel
         }}
       >
         <text style={{ fg: ink ?? c.highlight, marginRight: 1 }}>{highlighted ? "▶" : " "}</text>
-        {!nested && s.color && !ink && <text style={{ fg: s.color, marginRight: 1 }}>▍</text>}
+        {!nested && s.color && <text style={{ fg: s.color, marginRight: 1 }}>▍</text>}
         {inSplit && <text style={{ fg: ink ?? c.active, marginRight: 1 }}>◧</text>}
         {s.favorite && <text style={{ fg: ink ?? c.attention, marginRight: 1 }}>★</text>}
         <text style={{ fg: ink ?? m.dotColor, marginRight: 1 }}>{m.glyph}</text>
-        <text style={{ fg: ink ?? (m.needsAttention ? c.attention : c.name) }}>{s.name}</text>
+        <text style={{ fg: ink ?? accent }}>{s.name}</text>
         {multi && (
           <text onMouseDown={e => { e.stopPropagation(); onDelete(s.id) }} style={{ fg: ink ?? "#555555", marginLeft: 1 }}>✕</text>
         )}
@@ -169,8 +174,7 @@ export function SessionList({ entries, activeId, highlightedIdx, isInsert, onSel
     const needsAttention = !busy && e.sessions.some(s => s.id !== activeId && attention?.get(s.id))
     const waitingHere = !busy && !needsAttention && e.sessions.some(s => waiting?.get(s.id))
     const dotColor = busy ? c.busy : needsAttention ? c.attention : waitingHere ? c.waiting : c.idleDot
-    const fill = hasActive ? c.active : highlighted ? c.highlight : undefined
-    const ink = fill ? inkOn(fill) : undefined
+    const accent = hasActive ? c.active : highlighted ? c.highlight : c.name
     return (
       <box
         key={`grp-${e.color}`}
@@ -179,16 +183,16 @@ export function SessionList({ entries, activeId, highlightedIdx, isInsert, onSel
           flexDirection: "row", flexShrink: 0, paddingX: 1, height: "100%",
           border: true, borderStyle: "rounded",
           borderColor: hasActive ? c.active : highlighted ? c.highlight : e.color,
-          backgroundColor: fill,
+          backgroundColor: hasActive ? "#1a1a2e" : highlighted ? "#252525" : undefined,
         }}
       >
-        <text style={{ fg: ink ?? c.highlight, marginRight: 1 }}>{highlighted ? "▶" : " "}</text>
-        <text style={{ fg: ink ?? e.color, marginRight: 1 }}>▸</text>
-        <text style={{ fg: ink ?? c.name }}>{e.label}</text>
-        <text style={{ fg: ink ?? dotColor, marginLeft: 1 }}>
+        <text style={{ fg: c.highlight, marginRight: 1 }}>{highlighted ? "▶" : " "}</text>
+        <text style={{ fg: e.color, marginRight: 1 }}>▸</text>
+        <text style={{ fg: accent }}>{e.label}</text>
+        <text style={{ fg: dotColor, marginLeft: 1 }}>
           {busy ? SPINNER[spinnerFrame % SPINNER.length] : needsAttention || waitingHere ? "●" : "○"}
         </text>
-        <text style={{ fg: ink ?? "#555555", marginLeft: 1 }}>{e.sessions.length}</text>
+        <text style={{ fg: "#555555", marginLeft: 1 }}>{e.sessions.length}</text>
       </box>
     )
   }
