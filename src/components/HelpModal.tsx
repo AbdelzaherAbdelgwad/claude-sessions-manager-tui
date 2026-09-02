@@ -21,6 +21,8 @@ const HELP_LINES = [
   ["S", "flip split layout (side-by-side ↔ stacked)"],
   ["Tab", "focus the other pane (panes stay put, tmux style)"],
   ["v", "toggle the changes panel (git status for this session's cwd)"],
+  ["j / k", "with the changes panel open: pick a file"],
+  ["Enter", "with a file picked: open it in $EDITOR"],
   ["t", "theme menu (presets + accent color)"],
   ["/ or o", "session palette — fuzzy jump across every project"],
   ["Esc", "normal mode / forward to Claude"],

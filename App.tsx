@@ -19,7 +19,7 @@ import { PaletteModal, type PaletteItem } from "./src/components/PaletteModal"
 import { EnvModal } from "./src/components/EnvModal"
 import { ThemeModal } from "./src/components/ThemeModal"
 import { loadState, saveState, freshSessionId, loadOtherProjects, takeSession } from "./src/persistence"
-import { gitBranch, gitDirty, gitChanges, type GitChanges } from "./src/gitInfo"
+import { gitBranch, gitDirty, gitChanges, editorCommand, type GitChanges } from "./src/gitInfo"
 import { fuzzyScoreFields } from "./src/fuzzy"
 import { DiffPanel } from "./src/components/DiffPanel"
 
@@ -157,6 +157,11 @@ function App() {
   const [diffOpen, setDiffOpen] = useState(false)
   const [diffData, setDiffData] = useState<GitChanges | null>(null)
   const [diffLoading, setDiffLoading] = useState(false)
+  // Cursor over the panel's file list; -1 = nothing picked, so Enter still
+  // belongs to the tab bar until you actually select a file.
+  const [diffSel, setDiffSel] = useState(-1)
+  const [editorRunning, setEditorRunning] = useState(false)
+  const [editorError, setEditorError] = useState<string | null>(null)
   // Terminal width in columns, tracked so the tab bar can window on overflow.
   const [termWidth, setTermWidth] = useState(renderer.terminalWidth)
   const [termHeight, setTermHeight] = useState(renderer.terminalHeight)
@@ -209,6 +214,8 @@ function App() {
   const focusedSlotRef = useRef<0 | 1>(0)
   const splitLayoutRef = useRef<SplitLayout>(config.behavior.splitLayout)
   const diffOpenRef = useRef(false)
+  const diffSelRef = useRef(-1)
+  const diffDataRef = useRef<GitChanges | null>(null)
   // The nav entries the tab bar shows, mirrored for the input-handler closure.
   // highlightedIdx indexes THIS, not the session list — a collapsed group is one
   // entry covering several sessions. Refreshed on every render.
@@ -227,6 +234,8 @@ function App() {
   useEffect(() => { focusedSlotRef.current = focusedSlot }, [focusedSlot])
   useEffect(() => { collapsedRef.current = collapsed }, [collapsed])
   useEffect(() => { diffOpenRef.current = diffOpen }, [diffOpen])
+  useEffect(() => { diffSelRef.current = diffSel }, [diffSel])
+  useEffect(() => { diffDataRef.current = diffData }, [diffData])
   useEffect(() => { groupRenamingRef.current = groupRenaming }, [groupRenaming])
   useEffect(() => { groupRenameInputRef.current = groupRenameInput }, [groupRenameInput])
   // Both panes of a split are on screen, so neither may raise an attention flag.
@@ -320,6 +329,7 @@ function App() {
       // Ignore a result that arrived after the user moved on.
       if (activeIdRef.current !== id || !diffOpenRef.current) return
       setDiffData(ch)
+      setDiffSel(i => (i >= (ch?.files.length ?? 0) ? -1 : i))
       setDiffLoading(false)
       renderer.requestRender()
     })
@@ -340,6 +350,48 @@ function App() {
     setDiffData(null)
     refreshDiff(activeId)
   }, [diffOpen, activeId, refreshDiff])
+
+  // Open a changed file in $EDITOR. A terminal editor needs the TUI out of the
+  // way and the child holding the real stdio, so the renderer is suspended for
+  // the duration; a GUI editor is detached instead, or csm would block until
+  // its window closed.
+  const openChangedFile = useCallback(async (index: number) => {
+    const session = sessionsRef.current.find(s => s.id === activeIdRef.current)
+    const file = diffDataRef.current?.files[index]
+    if (!session || !file) return
+
+    const cmd = editorCommand(file.path)
+    if (!cmd) {
+      setEditorError("no $EDITOR set, and no vim/nano on PATH")
+      return
+    }
+    setEditorError(null)
+
+    if (cmd.gui) {
+      try {
+        Bun.spawn(cmd.argv, { cwd: session.cwd, stdio: ["ignore", "ignore", "ignore"] }).unref()
+      } catch {
+        setEditorError(`could not launch ${cmd.argv[0]}`)
+      }
+      return
+    }
+
+    setEditorRunning(true)
+    renderer.suspend()
+    try {
+      const proc = Bun.spawn(cmd.argv, { cwd: session.cwd, stdio: ["inherit", "inherit", "inherit"] })
+      await proc.exited
+    } catch {
+      setEditorError(`could not launch ${cmd.argv[0]}`)
+    } finally {
+      renderer.resume()
+      setEditorRunning(false)
+      renderer.requestRender()
+    }
+    // The file was very likely just edited, so re-read the worktree.
+    refreshDirty(session.id, session.cwd)
+    if (diffOpenRef.current) refreshDiff(session.id)
+  }, [refreshDirty, refreshDiff])
 
   // ── Track terminal width so the tab bar can window when tabs overflow ───────
 
@@ -889,6 +941,10 @@ function App() {
         if (seq === "h" || seq === "\x1b[D") { setHighlightedIdx(i => Math.max(i - 1, 0)); return true }
         if (seq === "L") { moveSession(1); return true }
         if (seq === "H") { moveSession(-1); return true }
+        if (seq === "\r" && diffOpenRef.current && diffSelRef.current >= 0) {
+          openChangedFile(diffSelRef.current)
+          return true
+        }
         if (seq === "\r" || seq === " ") { openSession(highlightedIdxRef.current); return true }
         if (seq === "i" || seq === "a") { enterInsert(); return true }
         if (seq === "r") { if (hl) { setRenaming(hl.id); setRenameInput(hl.name) } return true }
@@ -899,7 +955,15 @@ function App() {
         if (seq === "Z") { toggleAllGroups(); return true }
         if (seq === "u") { ungroupHighlighted(); return true }
         if (seq === "U") { ungroupAll(); return true }
-        if (seq === "v") { setDiffOpen(o => !o); return true }
+        if (seq === "v") { setDiffOpen(o => { if (o) setDiffSel(-1); return !o }); return true }
+        // The panel owns j/k and, once a file is picked, Enter — see openChangedFile.
+        if (diffOpenRef.current && (seq === "j" || seq === "k")) {
+          const count = diffDataRef.current?.files.length ?? 0
+          if (count === 0) return true
+          const d = seq === "j" ? 1 : -1
+          setDiffSel(i => Math.max(0, Math.min(count - 1, i < 0 ? 0 : i + d)))
+          return true
+        }
         if (seq === "R") { openGroupRename(); return true }
         if (seq === "s") { toggleSplit(); return true }
         if (seq === "S") { cycleSplitLayout(); return true }
@@ -912,6 +976,7 @@ function App() {
         if (seq === "m") { const next = !renderer.useMouse; renderer.useMouse = next; setMouseEnabled(next); return true }
         if (seq === "?") { setShowHelp(v => { if (!v) { setHelpScroll(0); setHelpQuery(""); setHelpSearching(false) } return !v }); return true }
         if ("123456789".includes(seq)) { const idx = parseInt(seq) - 1; if (idx < len) { setHighlightedIdx(idx); openSession(idx); } return true }
+        if (seq === "\x1b" && diffOpenRef.current && diffSelRef.current >= 0) { setDiffSel(-1); return true }
         if (seq === "\x1b") { ptySessions.get(activeIdRef.current)?.pty.write(seq); return true }
         if (seq.startsWith("\x1b[")) { ptySessions.get(activeIdRef.current)?.pty.write(seq); return true }
         return false
@@ -1194,8 +1259,12 @@ function App() {
           branch={branches.get(activeId)}
           changes={diffData}
           loading={diffLoading}
-          rows={Math.max(6, renderer.terminalHeight - 5)}
+          rows={Math.max(6, termHeight - 5)}
           width={diffWidth}
+          selected={diffSel}
+          onOpenFile={(i) => { setDiffSel(i); openChangedFile(i) }}
+          editorRunning={editorRunning}
+          editorError={editorError ?? undefined}
         />
       )}
       </box>

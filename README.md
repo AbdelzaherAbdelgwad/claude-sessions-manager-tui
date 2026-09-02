@@ -12,7 +12,7 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - **Tab-bar overflow** — when tabs exceed the terminal width, they window around the highlighted one with `‹N` / `N›` chevrons showing how many are hidden (click a chevron to reveal them)
 - **Status-bar context** — the bottom bar shows the active session's directory, git branch, and live state (`working…` / `waiting for input`)
 - **Uncommitted-changes marker** — a `✱` on any tab whose worktree is dirty, so you can see which agent actually wrote files
-- **Changes panel** — `v` opens a side panel listing the changed files in the active session's directory, with per-file `+`/`-` counts
+- **Changes panel** — `v` opens a side panel listing the changed files in the active session's directory, with per-file `+`/`-` counts; `j`/`k` pick a file and Enter opens it in `$EDITOR`
 - **Split pane** — press `s` to watch two sessions at once (side by side or stacked, `S` flips); `Tab` moves keyboard focus between them
 - **Configurable** — theme presets, colors, timing thresholds, and display toggles via `~/.claude-sessions-manager/config.json`
 - **Tab groups** — tag tabs with a color (`c` cycles) and they nest inside one group tab in the bar; `R` names it, `z` folds it down to a single tab that carries its members' status
@@ -126,6 +126,8 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 | `U` | Ungroup every group |
 | `R` | Rename the highlighted tab's group (empty input clears the name) |
 | `v` | Toggle the changes panel for the active session |
+| `j` / `k` | With the panel open: move the file cursor |
+| `Enter` | With a file picked: open it in `$EDITOR` |
 | `t` | Open the theme menu (pick a preset or set the accent color) |
 | `/` or `o` | Open the session palette (fuzzy jump; also reaches other projects) |
 
@@ -304,6 +306,22 @@ Each session tracks the git state of its own directory.
 - The status bar shows the branch (`⎇ main`) and a `✱` when the worktree has uncommitted changes.
 - Tabs carry the same `✱`, so you can tell at a glance which background session actually wrote files.
 - `v` opens a **changes panel** beside the terminal, listing the changed paths in the active session's directory with their status codes and per-file `+`/`-` counts, plus a total. Untracked files are listed too.
+- In the panel, `j`/`k` move a file cursor and Enter opens that file in your editor (clicking a row does both). `Esc` deselects. Until you pick a file the cursor is unset, so Enter still opens the highlighted session — the panel only claims the key once you're actually in the list.
+
+### Opening a file
+
+The editor comes from `$VISUAL`, then `$EDITOR`, falling back to whichever of
+`nvim` / `vim` / `nano` / `vi` is on PATH. Flags in the variable are kept, so
+`EDITOR="emacsclient -nw"` works.
+
+A **terminal** editor gets the terminal: csm suspends its own rendering, hands
+the child the real stdio, and resumes when the editor exits — then re-reads the
+worktree, since you probably just changed it. A **GUI** editor (`code`, `zed`,
+`subl`, …) is detached instead, so csm doesn't block until you close the window.
+Asking for `--wait` (or `-w`) overrides that and makes csm wait, since that's
+what the flag means.
+
+The file opens relative to the session's own directory, not csm's.
 
 The branch is read straight from `.git/HEAD`, so it's cheap enough to poll
 (`timing.gitPollMs`). Dirty state and the file list are not — they need to run

@@ -11,6 +11,14 @@ interface Props {
   // Rows available for the file list, so a long list can say what it hid.
   rows: number
   width: number
+  // Cursor over the file list; -1 when nothing is selected, which keeps Enter
+  // meaning "open the highlighted session" until you actually pick a file.
+  selected?: number
+  onOpenFile?: (index: number) => void
+  // Set while an editor is running so the panel can say why nothing responds.
+  editorRunning?: boolean
+  // Reason the last open attempt failed, if any.
+  editorError?: string
 }
 
 // Porcelain status codes → a readable one-word label and a color role.
@@ -28,13 +36,15 @@ function fit(path: string, width: number): string {
   return path.length <= width ? path : "…" + path.slice(path.length - width + 1)
 }
 
-export function DiffPanel({ sessionName, branch, changes, loading, rows, width }: Props) {
+export function DiffPanel({ sessionName, branch, changes, loading, rows, width, selected = -1, onOpenFile, editorRunning, editorError }: Props) {
   const c = config.colors
   // header (2) + summary (1) + footer hint (1)
   const listRows = Math.max(1, rows - 4)
   const files = changes?.files ?? []
-  const shown = files.slice(0, listRows)
-  const hidden = files.length - shown.length
+  // Scroll the list so the cursor stays visible once it runs past the fold.
+  const first = selected < 0 ? 0 : Math.max(0, Math.min(selected - listRows + 1, Math.max(0, files.length - listRows)))
+  const shown = files.slice(first, first + listRows)
+  const hidden = Math.max(0, files.length - (first + shown.length))
   // path column: width - border(2) - padding(2) - counts(9)
   const pathW = Math.max(8, width - 13)
 
@@ -65,13 +75,19 @@ export function DiffPanel({ sessionName, branch, changes, loading, rows, width }
         </text>
       )}
 
-      {shown.map(f => {
+      {shown.map((f, i) => {
+        const idx = first + i
+        const on = idx === selected
         const d = describe(f.code)
         const color = d.role === "add" ? c.busy : d.role === "del" ? c.deleted : c.dirty
         return (
-          <box key={f.path} style={{ flexDirection: "row", width: "100%" }}>
-            <text style={{ fg: color, marginRight: 1 }}>{f.code.trim() || "M"}</text>
-            <text style={{ fg: c.name }}>{fit(f.path, pathW)}</text>
+          <box
+            key={f.path}
+            onMouseDown={() => onOpenFile?.(idx)}
+            style={{ flexDirection: "row", width: "100%", backgroundColor: on ? "#252525" : undefined }}
+          >
+            <text style={{ fg: on ? c.highlight : color, marginRight: 1 }}>{on ? "▶" : (f.code.trim() || "M")}</text>
+            <text style={{ fg: on ? c.highlight : c.name }}>{fit(f.path, pathW)}</text>
             <text style={{ flexGrow: 1 }}> </text>
             {f.add >= 0 && <text style={{ fg: c.dirty }}>{`+${f.add}`}</text>}
             {f.del > 0 && <text style={{ fg: c.deleted }}>{` -${f.del}`}</text>}
@@ -82,7 +98,13 @@ export function DiffPanel({ sessionName, branch, changes, loading, rows, width }
       {hidden > 0 && <text style={{ fg: "#555555" }}>{`… ${hidden} more`}</text>}
 
       <text style={{ flexGrow: 1 }}> </text>
-      <text style={{ fg: "#555555" }}>v close · refreshes each turn</text>
+      {editorError && <text style={{ fg: c.deleted }}>{editorError}</text>}
+      <text style={{ fg: "#555555" }}>
+        {editorRunning ? "editor open…"
+          : files.length === 0 ? "v close · refreshes each turn"
+          : selected < 0 ? "j/k pick a file · v close"
+          : "Enter open in $EDITOR · Esc deselect · v close"}
+      </text>
     </box>
   )
 }

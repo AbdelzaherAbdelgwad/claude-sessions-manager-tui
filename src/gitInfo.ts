@@ -118,3 +118,39 @@ export async function gitChanges(cwd: string): Promise<GitChanges | null> {
   }
   return { files, insertions, deletions }
 }
+
+// ── Opening a changed file ──────────────────────────────────────────────────
+
+// Editors that take over the terminal, versus ones that open their own window.
+// A terminal editor needs the TUI suspended and the child given the real stdio;
+// a GUI one must be detached, or csm would block until the window is closed.
+const GUI_EDITORS = new Set([
+  "code", "code-insiders", "codium", "vscodium", "cursor", "windsurf", "zed",
+  "subl", "sublime_text", "atom", "gedit", "kate", "gvim", "mvim", "idea",
+  "webstorm", "goland", "pycharm", "rustrover", "fleet", "notepad++",
+])
+
+export interface EditorCommand {
+  argv: string[]
+  gui: boolean
+}
+
+// Resolve $VISUAL / $EDITOR into a command for `file`, or null when neither is
+// set and no fallback is on PATH. The variable may carry flags ("code -w",
+// "emacsclient -nw"), so it is split, and the flags are kept.
+export function editorCommand(file: string): EditorCommand | null {
+  const raw = (process.env.VISUAL || process.env.EDITOR || "").trim()
+  const parts = raw ? raw.split(/\s+/) : []
+  if (parts.length === 0) {
+    // Nothing configured: fall back to whatever common editor exists.
+    for (const candidate of ["nvim", "vim", "nano", "vi"]) {
+      if (Bun.which(candidate)) return { argv: [candidate, file], gui: false }
+    }
+    return null
+  }
+  const bin = parts[0].split("/").pop() ?? parts[0]
+  // `code -w` / `--wait` is an explicit request to block, so treat it as a
+  // terminal editor: the user wants csm to wait for the window to close.
+  const waits = parts.some(p => p === "-w" || p === "--wait")
+  return { argv: [...parts, file], gui: GUI_EDITORS.has(bin.toLowerCase()) && !waits }
+}
