@@ -1,5 +1,5 @@
 import XTermPkg from "@xterm/headless"
-import type { PtySession } from "./types"
+import type { PtySession, SessionKind } from "./types"
 import { conversationExists } from "./persistence"
 import { config } from "./config"
 
@@ -65,6 +65,20 @@ function markWaiting(id: number, onUpdate: () => void) {
 interface SpawnOpts {
   claudeSessionId: string
   cwd: string
+  kind?: SessionKind
+}
+
+// Command for a shell tab: the configured shell, else $SHELL, else whatever
+// common shell is actually installed.
+export function shellCommand(): string[] {
+  const configured = config.behavior.shell.trim()
+  if (configured) return configured.split(/\s+/)
+  const env = (process.env.SHELL ?? "").trim()
+  if (env) return [env, "-l"]
+  for (const candidate of ["bash", "zsh", "sh"]) {
+    if (Bun.which(candidate)) return [candidate, "-l"]
+  }
+  return ["sh"]
 }
 
 export function spawnSession(id: number, cols: number, rows: number, onUpdate: () => void, opts: SpawnOpts) {
@@ -111,12 +125,19 @@ export function spawnSession(id: number, cols: number, rows: number, onUpdate: (
       try { pty.write(reply) } catch { }
     })
   }
-  // Resume the conversation if it already exists; otherwise start it with our id
-  const idArgs = conversationExists(opts.claudeSessionId)
-    ? ["--resume", opts.claudeSessionId]
-    : ["--session-id", opts.claudeSessionId]
+  // A shell tab is just a shell: no conversation, so nothing to resume.
+  // Otherwise resume the conversation if it exists, else start it with our id.
+  const argv = opts.kind === "shell"
+    ? shellCommand()
+    : [
+        "claude",
+        ...(conversationExists(opts.claudeSessionId)
+          ? ["--resume", opts.claudeSessionId]
+          : ["--session-id", opts.claudeSessionId]),
+        "--settings", '{"tui":"fullscreen"}',
+      ]
   const proc = Bun.spawn(
-    ["claude", ...idArgs, "--settings", '{"tui":"fullscreen"}'],
+    argv,
     {
       terminal: pty,
       cwd: opts.cwd,
@@ -145,7 +166,8 @@ export function spawnSession(id: number, cols: number, rows: number, onUpdate: (
     waitingTimers.delete(id)
     activity.set(id, false)
     waiting.set(id, false)
-    xterm.write(`\r\n\x1b[1;31m[claude exited (code ${code})]\x1b[0m press Enter to restart\r\n`, () => {
+    const what = opts.kind === "shell" ? "shell" : "claude"
+    xterm.write(`\r\n\x1b[1;31m[${what} exited (code ${code})]\x1b[0m press Enter to restart\r\n`, () => {
       if (pinnedToBottom.has(id)) xterm.scrollToBottom()
       onUpdate()
     })

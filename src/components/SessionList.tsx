@@ -56,7 +56,8 @@ function entryWidth(e: NavEntry, multi: boolean, splitId: number | null | undefi
   }
   const s = e.session
   const base = 2 /*paddingX*/ + 2 /*cursor*/ + 2 /*dot+space*/ + s.name.length + (isDirty ? 2 : 0)
-    + (s.favorite ? 2 : 0) + (multi ? 2 : 0) + (s.id === splitId ? 2 : 0) + 1 /*gap*/
+    + (s.favorite ? 2 : 0) + (multi ? 2 : 0) + (s.id === splitId ? 2 : 0)
+    + (s.kind === "shell" ? 2 : 0) + 1 /*gap*/
   if (e.group) return base + (first ? GROUP_CHROME_W : 0)
   return base + 2 /*own border*/ + 2 /*extra paddingX*/ + (s.color ? 2 : 0)
 }
@@ -155,6 +156,7 @@ export function SessionList({ entries, activeId, highlightedIdx, isInsert, onSel
         <text style={{ fg: ink ?? c.highlight, marginRight: 1 }}>{highlighted ? "▶" : " "}</text>
         {!nested && s.color && <text style={{ fg: s.color, marginRight: 1 }}>▍</text>}
         {inSplit && <text style={{ fg: ink ?? c.active, marginRight: 1 }}>◧</text>}
+        {s.kind === "shell" && <text style={{ fg: ink ?? c.branch, marginRight: 1 }}>$</text>}
         {s.favorite && <text style={{ fg: ink ?? c.attention, marginRight: 1 }}>★</text>}
         <text style={{ fg: ink ?? m.dotColor, marginRight: 1 }}>{m.glyph}</text>
         <text style={{ fg: ink ?? accent }}>{s.name}</text>

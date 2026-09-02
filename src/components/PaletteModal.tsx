@@ -104,6 +104,7 @@ export function PaletteModal({ query, items, localCount, highlightedIdx, loading
             style={{ flexDirection: "row", width: "100%", paddingX: 1, backgroundColor: on ? "#252525" : undefined }}
           >
             <text style={{ fg: on ? c.highlight : "#333333", marginRight: 1 }}>{on ? "▶" : " "}</text>
+            {s.kind === "shell" && <text style={{ fg: c.branch }}>$ </text>}
             {s.favorite && <text style={{ fg: c.attention }}>★ </text>}
             {item.kind === "local" && item.group && <text style={{ fg: s.color }}>▍ </text>}
             <text style={{ fg: on ? c.highlight : "#cccccc" }}>{s.name}</text>

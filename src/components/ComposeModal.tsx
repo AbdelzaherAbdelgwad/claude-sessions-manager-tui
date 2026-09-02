@@ -4,8 +4,8 @@ import { config } from "../config"
 // Every binding the buffer accepts, grouped so the legend reads in three short
 // lines rather than one that runs off the edge.
 const HINTS: Array<Array<[string, string]>> = [
-  [["Enter", "newline"], ["Ctrl+S", "send"], ["Ctrl+D", "send"], ["Esc", "keep draft"], ["Ctrl+C", "keep draft"]],
-  [["← →", "char"], ["↑ ↓", "row"], ["Ctrl+A", "line start"], ["Ctrl+E", "line end"], ["Home End", "buffer"]],
+  [["Enter", "newline"], ["Ctrl+S", "send"], ["Esc", "keep draft"], ["Ctrl+C", "keep draft"]],
+  [["← →", "char"], ["↑ ↓", "row"], ["Ctrl+A", "line start"], ["Ctrl+E", "line end"]],
   [["Bksp", "delete back"], ["Del", "delete"], ["Ctrl+W", "delete word"], ["Ctrl+U", "clear"]],
 ]
 

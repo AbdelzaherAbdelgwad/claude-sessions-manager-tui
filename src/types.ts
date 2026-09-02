@@ -1,5 +1,9 @@
 export type Mode = "normal" | "insert"
 
+// What a tab runs. "claude" is the default and the only kind with a
+// conversation to resume; "shell" is a plain login shell in the same cwd.
+export type SessionKind = "claude" | "shell"
+
 export interface Session {
   id: number
   name: string
@@ -7,6 +11,7 @@ export interface Session {
   color?: string          // optional hex color tag for grouping tabs visually
   claudeSessionId: string // UUID we mint and pass to `claude --session-id`
   cwd: string             // directory claude was spawned in (resume is cwd-scoped)
+  kind?: SessionKind      // omitted means "claude", so old state files still load
   worktree?: boolean      // cwd is a git worktree csm created, so deleting the
                           // tab can offer to remove it again
 }

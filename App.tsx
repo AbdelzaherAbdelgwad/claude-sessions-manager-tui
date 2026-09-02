@@ -4,7 +4,7 @@ import { createRoot } from "@opentui/react"
 import { paintXterm } from "./src/render"
 import { setHostPalette } from "./src/colors"
 import { ptySessions, spawnSession, killSession, pinnedToBottom, activity, waiting, attention, setVisibleSessions, sessionEnv, onSessionWaiting } from "./src/pty"
-import type { Mode, NavEntry, Session } from "./src/types"
+import type { Mode, NavEntry, Session, SessionKind } from "./src/types"
 import type { SessionStatus } from "./src/components/StatusBar"
 import { config, applyTheme, setColor, isHexColor, themeNames, setBehavior, setGroupName, type SplitLayout } from "./src/config"
 import { SessionList } from "./src/components/SessionList"
@@ -124,6 +124,11 @@ let sessionCounter = initialState.sessions.reduce((max, s) => {
   const m = s.name.match(/^Session (\d+)$/)
   return m ? Math.max(max, parseInt(m[1])) : max
 }, 0) || initialState.sessions.length
+// Shell tabs number independently of Claude ones.
+let shellCounter = initialState.sessions.reduce((max, s) => {
+  const m = s.name.match(/^shell (\d+)$/)
+  return m ? Math.max(max, parseInt(m[1])) : max
+}, 0)
 
 function App() {
   const [sessions, setSessions] = useState<Session[]>(initialState.sessions)
@@ -468,7 +473,7 @@ function App() {
         spawnSession(id, w, h, () => {
           setTerminalUpdate(n => n + 1)
           renderer.requestRender()
-        }, { claudeSessionId: session.claudeSessionId, cwd: session.cwd })
+        }, { claudeSessionId: session.claudeSessionId, cwd: session.cwd, kind: session.kind })
       }
     } else if (w !== existing.xterm.cols || h !== existing.xterm.rows) {
       existing.xterm.resize(w, h)
@@ -593,13 +598,26 @@ function App() {
     if (!renderer.useMouse) { renderer.useMouse = true; setMouseEnabled(true) }
   }
 
-  const addSession = () => {
+  // `n` opens the default (a Claude session); `T` opens a plain shell in the
+  // same directory. Shell tabs are numbered separately so the two don't
+  // interleave into one confusing sequence.
+  const addSession = (kind: SessionKind = "claude") => {
     const id = Date.now()
+    const shell = kind === "shell"
+    const name = shell ? `shell ${++shellCounter}` : `Session ${++sessionCounter}`
     setSessions(prev => {
       const taken = new Set(prev.map(s => s.claudeSessionId))
       const next = sortSessions([
         ...prev,
-        { id, name: `Session ${++sessionCounter}`, claudeSessionId: freshSessionId(taken), cwd: process.cwd() },
+        {
+          id,
+          name,
+          ...(shell ? { kind: "shell" as const } : {}),
+          claudeSessionId: freshSessionId(taken),
+          // Open where the session you are on is, not where csm was launched —
+          // a shell is most useful in the directory you are looking at.
+          cwd: sessionsRef.current.find(s => s.id === activeIdRef.current)?.cwd ?? process.cwd(),
+        },
       ])
       setHighlightedIdx(entryIdxOf(next, id))
       return next
@@ -1033,7 +1051,9 @@ function App() {
         if (seq === "\x13") { sendCompose(); return true }                       // Ctrl+S
         if (seq === "\x1b") { closeCompose(true); return true }
         if (seq === "\x03") { closeCompose(true); return true }                  // Ctrl+C
-        if (seq === "\x04") { sendCompose(); return true }                       // Ctrl+D
+        // Ctrl+D is swallowed rather than sending: it is quit everywhere else,
+        // and one send key is less to get wrong mid-draft.
+        if (seq === "\x04") { return true }
         if (seq === "\x15") { setCompose("", 0); return true }                   // Ctrl+U
         if (seq === "\x17") { setCompose(t.slice(0, wordStartBefore(t, c)) + t.slice(c), wordStartBefore(t, c)); return true } // Ctrl+W
         if (seq === "\x01") { setCompose(t, t.lastIndexOf("\n", Math.max(0, c - 1)) + 1); return true } // Ctrl+A
@@ -1049,8 +1069,6 @@ function App() {
         if (seq === "\x1b[C") { setCompose(t, c + 1); return true }
         if (seq === "\x1b[A") { setCompose(t, caretVertical(t, c, w, -1)); return true }
         if (seq === "\x1b[B") { setCompose(t, caretVertical(t, c, w, 1)); return true }
-        if (seq === "\x1b[H") { setCompose(t, 0); return true }
-        if (seq === "\x1b[F") { setCompose(t, t.length); return true }
         // Printable input, including multi-byte characters.
         if (!seq.startsWith("\x1b") && seq.charCodeAt(0) >= 32) { insertCompose(seq); return true }
         return true
@@ -1218,6 +1236,7 @@ function App() {
         if (seq === "t") { setThemeSel(Math.max(0, themeNames.indexOf(config.theme))); setThemeEditing(false); setThemeEdit(""); setThemeModalOpen(true); return true }
         if (seq === "/") { openPalette(); return true }
         if (seq === "n") { addSession(); return true }
+        if (seq === "T") { addSession("shell"); return true }
         if (seq === "o") { openPalette(); return true }
         if (seq === "d") { setDeleteConfirm(hl?.id ?? null); return true }
         if (seq === "m") { const next = !renderer.useMouse; renderer.useMouse = next; setMouseEnabled(next); return true }
@@ -1477,7 +1496,7 @@ function App() {
             groupCount={sessionGroupColors.length}
             allCollapsed={sessionGroupColors.length > 0 && sessionGroupColors.every(c => collapsed.has(c))}
             onDelete={id => setDeleteConfirm(id)}
-            onAdd={addSession}
+            onAdd={() => addSession()}
             activeSessions={activity}
             attention={attention}
             waiting={waiting}

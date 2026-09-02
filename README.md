@@ -12,6 +12,7 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - **Tab-bar overflow** — when tabs exceed the terminal width, they window around the highlighted one with `‹N` / `N›` chevrons showing how many are hidden (click a chevron to reveal them)
 - **Status-bar context** — the bottom bar shows the active session's directory, git branch, and live state (`working…` / `waiting for input`)
 - **Uncommitted-changes marker** — a `✱` on any tab whose worktree is dirty, so you can see which agent actually wrote files
+- **Terminal tabs** — `T` opens a plain shell as a tab instead of a Claude session, in the directory you're already in; everything else (groups, splits, git panel, status) works the same
 - **Worktree sessions** — `w` creates a git worktree for a branch and opens a session in it, so several agents can work on different branches of one repo at once without touching each other's files
 - **Changes panel** — `v` opens a side panel listing the changed files in the active session's directory, with per-file `+`/`-` counts; `j`/`k` pick a file and Enter opens it in `$EDITOR`
 - **Split pane** — press `s` to watch two sessions at once (side by side or stacked, `S` flips); `Tab` moves keyboard focus between them
@@ -110,6 +111,7 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 | `i` / `a` | Enter INSERT mode |
 | `p` | Compose a prompt in an editor and send it (`Ctrl+S`) |
 | `n` | New session |
+| `T` | New terminal tab — a plain shell instead of Claude |
 | `w` | New session in a fresh git worktree (prompts for a branch) |
 | `d` | Delete highlighted session (with confirmation) |
 | `Ctrl+C` | Delete active session (with confirmation) |
@@ -187,6 +189,26 @@ Space to page, `g`/`G` for top/bottom) and filters:
 - with a filter applied, `Esc` clears it first and only closes the modal on the second press
 - `?` or `q` closes at any time
 
+## Terminal Tabs
+
+`n` opens a Claude session — that stays the default. `T` opens a **plain shell**
+in the same tab bar, running in the directory of the session you were on rather
+than wherever csm was launched.
+
+Shell tabs are marked with `$` in the tab bar and the palette, and are numbered
+separately (`shell 1`, `shell 2`) so they don't interleave with `Session N`.
+
+They behave like any other tab: groups, splits, the changes panel, per-session
+env vars, renaming, favorites and the status bar all apply. The activity
+indicators work too, so a long build turns the tab gold when it finishes while
+you're looking elsewhere. If the shell exits, Enter restarts it.
+
+The one difference is that a shell has no conversation, so nothing is resumed —
+restoring a saved shell tab starts a fresh shell in the same directory.
+
+Set `behavior.shell` to choose the command; otherwise it's `$SHELL -l`, falling
+back to whichever of `bash`, `zsh` or `sh` exists.
+
 ## Compose Buffer
 
 INSERT mode forwards keystrokes into Claude's own line editor inside the PTY.
@@ -196,10 +218,9 @@ revise before it is submitted. `p` opens a buffer to write in first:
 | Key | Action |
 |-----|--------|
 | `Enter` | Newline (it does **not** send) |
-| `Ctrl+S` or `Ctrl+D` | Send to the active session |
+| `Ctrl+S` | Send to the active session |
 | `←` `→` `↑` `↓` | Move the caret (`↑`/`↓` move by display row, so wrapping is respected) |
 | `Ctrl+A` / `Ctrl+E` | Start / end of line |
-| `Home` / `End` | Start / end of the buffer |
 | `Ctrl+W` | Delete the previous word |
 | `Ctrl+U` | Clear the buffer |
 | `Backspace` / `Del` | Delete before / at the caret |
@@ -420,7 +441,7 @@ On first run, `csm` writes a config file with defaults to `~/.claude-sessions-ma
 | `theme` | `dark`, `light`, `solarized` | A named color preset used as the base palette |
 | `colors` | `active`, `highlight`, `attention`, `waiting`, `busy`, `idleDot`, `name`, `border`, `branch`, `cwd`, `dirty`, `deleted` | Hex colors for tab, status-bar and changes-panel elements |
 | `timing` | `idleMs`, `waitingMs`, `gitPollMs` | Silence before the spinner stops; sustained silence before a turn counts as "waiting for input"; how often git branches are re-read |
-| `behavior` | `showCwd`, `showBranch`, `splitLayout`, `showDirty`, `worktreeRoot` | Toggle the directory / git branch in the status bar and the `✱` dirty markers; `splitLayout` is `"side-by-side"` or `"stacked"` (also set by `S`); `worktreeRoot` is where `w` puts new worktrees (default: beside the repo) |
+| `behavior` | `showCwd`, `showBranch`, `splitLayout`, `showDirty`, `worktreeRoot`, `shell` | Toggle the directory / git branch in the status bar and the `✱` dirty markers; `splitLayout` is `"side-by-side"` or `"stacked"` (also set by `S`); `worktreeRoot` is where `w` puts new worktrees (default: beside the repo); `shell` is the command `T` runs (default: `$SHELL`) |
 | `groups` | `"1"` – `"7"` | Display names for the color groups, keyed by tag index in the order `c` cycles them; titles the group tab and shows in the status bar |
 
 `theme` picks the base palette; any keys you set under `colors` **override the theme per-key**, so a custom color always wins over the preset.

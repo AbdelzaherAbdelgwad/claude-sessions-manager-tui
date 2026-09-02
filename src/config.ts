@@ -38,6 +38,8 @@ export interface Behavior {
   // Directory new git worktrees are created under. Empty means alongside the
   // repository, as a sibling named <repo>-<branch>.
   worktreeRoot: string
+  // Command for shell tabs. Empty means $SHELL, then a sensible fallback.
+  shell: string
 }
 
 export interface Config {
@@ -112,6 +114,7 @@ export const DEFAULTS: Config = {
     splitLayout: "side-by-side",
     showDirty: true,
     worktreeRoot: "",
+    shell: "",
   },
   groups: {},
 }

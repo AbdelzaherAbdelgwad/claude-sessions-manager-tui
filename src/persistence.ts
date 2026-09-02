@@ -69,6 +69,7 @@ function sanitizeSessions(raw: any[], taken: Set<string>): Session[] {
         name: s.name,
         favorite: !!s.favorite,
         ...(typeof s.color === "string" ? { color: s.color } : {}),
+        ...(s.kind === "shell" ? { kind: "shell" as const } : {}),
         ...(s.worktree ? { worktree: true as const } : {}),
         claudeSessionId,
         cwd: typeof s.cwd === "string" ? s.cwd : process.cwd(),

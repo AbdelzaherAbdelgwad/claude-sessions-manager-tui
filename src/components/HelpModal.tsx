@@ -28,6 +28,7 @@ const HELP_LINES = [
   ["/ or o", "session palette — fuzzy jump across every project"],
   ["Esc", "normal mode / forward to Claude"],
   ["n", "new session"],
+  ["T", "new terminal tab — a plain shell instead of Claude"],
   ["w", "new session in a fresh git worktree (name a branch)"],
   ["d", "delete session"],
   ["PgUp / PgDn", "scroll terminal"],
@@ -49,6 +50,7 @@ const LEGEND = [
   ["◧", "#FFA500", "shown in the other split pane"],
   ["▸", "#BD93F9", "folded group — its dot is the loudest of its members"],
   ["▶", "#00BFFF", "keyboard cursor (filled tab = active / highlighted)"],
+  ["$", "#6a9955", "terminal tab — a shell, not a Claude session"],
 ]
 
 // Show the config path with the home directory collapsed to ~ for brevity.
@@ -58,7 +60,7 @@ const CONFIG_LINES = [
   ["theme", "dark / light / solarized (a colors override wins per-key)"],
   ["colors", "active / highlight / attention / waiting / busy / branch / cwd …"],
   ["timing", "idleMs, waitingMs (idle → “waiting”), gitPollMs"],
-  ["behavior", "showCwd, showBranch, splitLayout, showDirty"],
+  ["behavior", "showCwd, showBranch, splitLayout, showDirty, worktreeRoot, shell"],
   ["groups", "names for the color groups, keyed \"1\"–\"7\" (shown in status bar)"],
 ]
 
