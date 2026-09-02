@@ -18,20 +18,21 @@ export const activity = new Map<number, boolean>()
 // mid-task. This is the "waiting for input" vs "still working" distinction.
 export const waiting = new Map<number, boolean>()
 // True when a session entered the waiting state while you were looking at a
-// DIFFERENT tab — i.e. it wants your attention. Cleared by setActiveSession.
+// DIFFERENT tab — i.e. it wants your attention. Cleared by setVisibleSessions.
 export const attention = new Map<number, boolean>()
 const idleTimers = new Map<number, ReturnType<typeof setTimeout>>()
 const waitingTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
-// The tab currently on screen. A session waiting while it's the active tab
-// isn't "unseen", so it never raises an attention flag.
-let activeSessionId = -1
+// The sessions currently painted on screen — one normally, two while a split
+// pane is open. A session that finishes its turn while on screen isn't
+// "unseen", so it never raises an attention flag.
+let visibleIds = new Set<number>()
 
-// Called by the UI whenever the visible tab changes. Switching to a session
-// also acknowledges (clears) its pending attention flag.
-export function setActiveSession(id: number) {
-  activeSessionId = id
-  attention.delete(id)
+// Called by the UI whenever the set of on-screen sessions changes. Becoming
+// visible also acknowledges (clears) a session's pending attention flag.
+export function setVisibleSessions(ids: number[]) {
+  visibleIds = new Set(ids)
+  for (const id of ids) attention.delete(id)
 }
 
 // Silence before the streaming spinner stops, and the (longer) sustained
@@ -46,7 +47,7 @@ const WAITING_MS = config.timing.waitingMs
 function markWaiting(id: number, onUpdate: () => void) {
   if (waiting.get(id)) return
   waiting.set(id, true)
-  if (id !== activeSessionId) attention.set(id, true)
+  if (!visibleIds.has(id)) attention.set(id, true)
   onUpdate()
 }
 

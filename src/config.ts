@@ -25,9 +25,13 @@ export interface Timing {
   gitPollMs: number   // how often to re-read each session's git branch
 }
 
+// Which way the two panes sit when a split is open.
+export type SplitLayout = "side-by-side" | "stacked"
+
 export interface Behavior {
   showCwd: boolean
   showBranch: boolean
+  splitLayout: SplitLayout
 }
 
 export interface Config {
@@ -35,6 +39,9 @@ export interface Config {
   colors: Colors
   timing: Timing
   behavior: Behavior
+  // Display names for the color-tag groups, keyed by tag index ("1".."7").
+  // Unnamed groups fall back to "group N".
+  groups: Record<string, string>
 }
 
 // Named color palettes. "dark" is the baseline; a user selects one via
@@ -90,13 +97,24 @@ export const DEFAULTS: Config = {
   behavior: {
     showCwd: true,
     showBranch: true,
+    splitLayout: "side-by-side",
   },
+  groups: {},
 }
 
 // Resolve config from the raw parsed file. Colors layer as:
 //   theme palette (or dark)  <  explicit `colors` keys from the file
 // so a user's custom colors always override the chosen theme, per-key. timing
 // and behavior merge one level deep over the defaults; unknown keys are ignored.
+// Keep only string-valued entries — the group map is hand-edited in the config
+// file, so a stray number/object must not reach the renderer.
+function sanitizeGroups(raw: any): Record<string, string> {
+  if (!raw || typeof raw !== "object") return {}
+  return Object.fromEntries(
+    Object.entries(raw).filter(([, v]) => typeof v === "string"),
+  ) as Record<string, string>
+}
+
 function resolve(raw: any): Config {
   if (!raw || typeof raw !== "object") return DEFAULTS
   const theme = typeof raw.theme === "string" && THEMES[raw.theme] ? raw.theme : "dark"
@@ -105,6 +123,7 @@ function resolve(raw: any): Config {
     colors: { ...THEMES[theme], ...(raw.colors ?? {}) },
     timing: { ...DEFAULTS.timing, ...(raw.timing ?? {}) },
     behavior: { ...DEFAULTS.behavior, ...(raw.behavior ?? {}) },
+    groups: sanitizeGroups(raw.groups),
   }
 }
 
@@ -123,7 +142,7 @@ function load(): Config {
     // switching the theme actually takes effect (a full color dump would pin
     // every color and defeat theme selection). Users add overrides under colors.
     mkdirSync(CONFIG_DIR, { recursive: true })
-    const seed = { theme: "dark", colors: {}, timing: DEFAULTS.timing, behavior: DEFAULTS.behavior }
+    const seed = { theme: "dark", colors: {}, timing: DEFAULTS.timing, behavior: DEFAULTS.behavior, groups: {} }
     writeFileSync(CONFIG_PATH, JSON.stringify(seed, null, 2) + "\n")
   } catch {
     // Unreadable/malformed config or unwritable dir → fall back to defaults.
@@ -147,7 +166,7 @@ export function isHexColor(s: string): boolean {
 function persist(): void {
   try {
     mkdirSync(CONFIG_DIR, { recursive: true })
-    const out = { theme: config.theme, colors: userColorOverrides, timing: config.timing, behavior: config.behavior }
+    const out = { theme: config.theme, colors: userColorOverrides, timing: config.timing, behavior: config.behavior, groups: config.groups }
     writeFileSync(CONFIG_PATH, JSON.stringify(out, null, 2) + "\n")
   } catch {
     // ignore — changes still apply for this session
@@ -170,6 +189,26 @@ export function setColor(key: keyof Colors, hex: string): void {
   if (!isHexColor(hex)) return
   userColorOverrides[key] = hex
   config.colors = { ...config.colors, [key]: hex }
+  persist()
+}
+
+// Update a single behavior flag at runtime and persist it (e.g. the split
+// layout toggled with `S`). Mutates `config` so the next render picks it up.
+export function setBehavior<K extends keyof Behavior>(key: K, value: Behavior[K]): void {
+  config.behavior = { ...config.behavior, [key]: value }
+  persist()
+}
+
+// Name (or, with an empty string, un-name) a color group and persist it. The
+// key is the tag index in TAG_COLORS order, "1".."7"; an un-named group falls
+// back to its generic "group N" label. Mutates `config` for the next render.
+export function setGroupName(index: number, name: string): void {
+  const key = String(index)
+  const groups = { ...config.groups }
+  const trimmed = name.trim()
+  if (trimmed) groups[key] = trimmed
+  else delete groups[key]
+  config.groups = groups
   persist()
 }
 

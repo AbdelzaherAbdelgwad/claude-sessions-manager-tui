@@ -11,8 +11,9 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - **Attention signals** — a tab lights up gold when its session finishes a turn or rings the bell while you're viewing another tab; switching to it clears the flag
 - **Tab-bar overflow** — when tabs exceed the terminal width, they window around the highlighted one with `‹N` / `N›` chevrons showing how many are hidden (click a chevron to reveal them)
 - **Status-bar context** — the bottom bar shows the active session's directory, git branch, and live state (`working…` / `waiting for input`)
+- **Split pane** — press `s` to watch two sessions at once (side by side or stacked, `S` flips); `Tab` moves keyboard focus between them
 - **Configurable** — theme presets, colors, timing thresholds, and display toggles via `~/.claude-sessions-manager/config.json`
-- **Color tags** — tag a tab with a color (`c` cycles) to group related sessions visually
+- **Tab groups** — tag tabs with a color (`c` cycles) and they nest inside one group tab in the bar; `R` names it, `z` folds it down to a single tab that carries its members' status
 - **Faithful colors** — Claude's output keeps your terminal's own ANSI palette (queried once via OSC 4) and its text styles (bold, dim, italic, underline, strikethrough), so a session looks like plain `claude` does
 - **Favorites** — star sessions (`*`); they sort to the front
 - **Rename** sessions (`r`) and **search/filter** them (`/`) via modals
@@ -117,9 +118,26 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 | `r` | Rename session |
 | `e` | Session env vars — type `KEY=VALUE` to add, or `↑`/`↓` to pick an existing var and `r` to remove it; respawns `claude` (resumes the conversation) |
 | `*` | Star / unstar session (sorts to front) |
-| `c` | Cycle the highlighted session's color tag |
+| `c` | Cycle the highlighted session's color tag (moves the tab into that group) |
+| `z` | Fold / unfold the highlighted tab's group |
+| `R` | Rename the highlighted tab's group (empty input clears the name) |
 | `t` | Open the theme menu (pick a preset or set the accent color) |
 | `/` | Search / filter sessions |
+
+### Split pane (NORMAL mode)
+
+| Key | Action |
+|-----|--------|
+| `s` | Split with the highlighted session / close the split |
+| `S` | Flip the layout (side-by-side ↔ stacked) — persisted to the config |
+| `Tab` | Move keyboard focus to the other pane |
+
+Panes keep their place: `Tab` moves focus between them the way tmux does, it
+does not exchange their contents. Only the focused pane wears the accent border
+and receives keystrokes; clicking the other pane focuses it. Picking a different
+tab from the tab bar loads it into the focused pane, leaving the other alone.
+Both panes count as on screen, so neither raises a gold attention flag while
+you're watching it.
 
 ### INSERT mode
 
@@ -154,14 +172,68 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 
 ## Session List
 
-The active tab has an orange name/border; the keyboard-highlighted tab has a blue one. Each tab carries a status marker:
+Selection is a solid fill, so it stays obvious even for tabs nested inside a
+group (which have no border of their own):
+
+- the **active** tab — the session showing in the pane — is filled with the accent color
+- the **keyboard-highlighted** tab is filled with the highlight color
+- a `▶` marks wherever the keyboard cursor is, so "cursor on the active tab" still reads differently from "active tab"
+
+Text on a filled tab flips to a contrasting ink automatically, so custom accent
+colors stay readable. The cursor cell is always reserved, so moving the highlight
+never reflows the bar. In INSERT mode the cursor disappears and only the active
+fill remains.
+
+Each tab carries a status marker:
 
 - `⠋` green spinner = streaming (Claude is generating)
 - `●` cyan = finished its turn, waiting for your input
 - `●` gold = wants attention (finished on a tab you weren't viewing)
 - `○` dim = idle
 
-A `▍` bar in a session's color appears at the left of the tab when it has a color tag (`c` to cycle).
+A `▍` bar in a session's color appears at the left of the tab when it has a color tag (`c` to cycle), and `◧` marks the session showing in the other split pane.
+
+## Tab Groups
+
+`c` cycles a tab's color tag. Tabs sharing a tag sort together and are drawn
+**inside one group tab** — a bordered container titled with the group's name:
+
+```
+╭─ backend ──────────╮ ╭─ frontend ─╮
+│ ● api  ● migrator  │ │ ● web      │  ╭─────────╮  ╭─────────╮
+╰────────────────────╯ ╰────────────╯  │ ○ notes │  │ ○ spike │
+                                       ╰─────────╯  ╰─────────╯
+```
+
+Favorites still come first, and untagged tabs stay as ordinary standalone tabs
+at the end. Tagging a tab moves it into its group immediately and the highlight
+follows it.
+
+Press `z` to **fold** a group down to a single tab:
+
+```
+╭─ ▸ backend ● 2 ─╮
+```
+
+A folded group is one stop for `h` / `l` and for `1`–`9`, and its dot shows the
+loudest status among the tabs it hides — so a session inside it can still turn
+gold for attention or spin while generating. `Enter` (or a click) unfolds it and
+lands on its first member; `z` folds it again.
+
+`H` / `L` reorder within a group — they won't push a tab across a group or
+favorite boundary, since the sort would just snap it back.
+
+Press `R` to name the group the highlight is in. The name titles its group tab
+and shows in the status bar for the active session; submitting an empty name
+clears it, falling back to `group 3`, and so on.
+
+Names are written straight to the config, so they survive a restart. You can
+also set them by hand — the keys are tag indices in the order `c` cycles through
+them (`1`–`7`):
+
+```json
+{ "groups": { "1": "backend", "2": "frontend" } }
+```
 
 Other interactions:
 
@@ -196,7 +268,8 @@ On first run, `csm` writes a config file with defaults to `~/.claude-sessions-ma
 | `theme` | `dark`, `light`, `solarized` | A named color preset used as the base palette |
 | `colors` | `active`, `highlight`, `attention`, `waiting`, `busy`, `idleDot`, `name`, `border`, `branch`, `cwd` | Hex colors for tab and status-bar elements |
 | `timing` | `idleMs`, `waitingMs`, `gitPollMs` | Silence before the spinner stops; sustained silence before a turn counts as "waiting for input"; how often git branches are re-read |
-| `behavior` | `showCwd`, `showBranch` | Toggle the directory / git branch in the status bar |
+| `behavior` | `showCwd`, `showBranch`, `splitLayout` | Toggle the directory / git branch in the status bar; `splitLayout` is `"side-by-side"` or `"stacked"` (also set by `S`) |
+| `groups` | `"1"` – `"7"` | Display names for the color groups, keyed by tag index in the order `c` cycles them; titles the group tab and shows in the status bar |
 
 `theme` picks the base palette; any keys you set under `colors` **override the theme per-key**, so a custom color always wins over the preset.
 
@@ -209,5 +282,14 @@ Example — use the Solarized preset but force a custom attention color, and wai
   "theme": "solarized",
   "colors": { "attention": "#B8860B" },
   "timing": { "waitingMs": 5000 }
+}
+```
+
+Example — name the first two color groups and default to stacked panes:
+
+```json
+{
+  "groups": { "1": "backend", "2": "frontend" },
+  "behavior": { "splitLayout": "stacked" }
 }
 ```

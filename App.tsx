@@ -3,10 +3,10 @@ import { createCliRenderer, LayoutEvents, type BoxRenderable } from "@opentui/co
 import { createRoot } from "@opentui/react"
 import { paintXterm } from "./src/render"
 import { setHostPalette } from "./src/colors"
-import { ptySessions, spawnSession, killSession, pinnedToBottom, activity, waiting, attention, setActiveSession, sessionEnv } from "./src/pty"
-import type { Mode, Session } from "./src/types"
+import { ptySessions, spawnSession, killSession, pinnedToBottom, activity, waiting, attention, setVisibleSessions, sessionEnv } from "./src/pty"
+import type { Mode, NavEntry, Session } from "./src/types"
 import type { SessionStatus } from "./src/components/StatusBar"
-import { config, applyTheme, setColor, isHexColor, themeNames } from "./src/config"
+import { config, applyTheme, setColor, isHexColor, themeNames, setBehavior, setGroupName, type SplitLayout } from "./src/config"
 import { SessionList } from "./src/components/SessionList"
 import { TerminalView } from "./src/components/TerminalView"
 import { StatusBar } from "./src/components/StatusBar"
@@ -53,11 +53,61 @@ renderer
 // Color tags cycled by `c` on the highlighted tab. undefined = no tag.
 const TAG_COLORS: Array<string | undefined> = [undefined, "#FF5555", "#FFB86C", "#F1FA8C", "#50FA7B", "#8BE9FD", "#BD93F9", "#FF79C6"]
 
-// Stable sort: favorites first, original order preserved within each group
-const sortByFavorite = (list: Session[]): Session[] =>
+// Display name for a color group: the user's label from config.groups (keyed
+// by tag index, "1".."7"), else a generic one.
+function groupName(color: string | undefined): string {
+  const idx = TAG_COLORS.indexOf(color)
+  return idx > 0 ? config.groups[String(idx)] ?? `group ${idx}` : ""
+}
+
+// Sort key for the color tag: the order `c` cycles through them, with untagged
+// (and any stale color from an old state file) trailing at the end.
+const groupRank = (s: Session): number => {
+  const i = TAG_COLORS.indexOf(s.color)
+  return i > 0 ? i : TAG_COLORS.length
+}
+
+// The tabs the nav bar shows — and, crucially, the list every NORMAL-mode
+// navigation key indexes into, so h/l/1-9/d never land on a hidden tab.
+function filterSessions(list: Session[], query: string): Session[] {
+  const q = query.toLowerCase()
+  return q ? list.filter(s => s.name.toLowerCase().includes(q)) : list
+}
+
+// Turn the sorted tab list into addressable nav entries. A color run is either
+// expanded — one entry per member, drawn inside the group's container — or
+// collapsed to a single entry standing in for the whole group.
+function buildNav(list: Session[], collapsed: Set<string>): NavEntry[] {
+  const out: NavEntry[] = []
+  for (let i = 0; i < list.length;) {
+    const color = list[i].color
+    if (!color) { out.push({ kind: "session", session: list[i] }); i++; continue }
+    let j = i
+    while (j < list.length && list[j].color === color) j++
+    const run = list.slice(i, j)
+    const label = groupName(color)
+    if (collapsed.has(color)) out.push({ kind: "group", color, label, sessions: run })
+    else for (const session of run) out.push({ kind: "session", session, group: color, groupLabel: label })
+    i = j
+  }
+  return out
+}
+
+// The session an entry addresses: a collapsed group stands in for its members,
+// so keys that need one specific tab fall back to the group's first.
+const entrySession = (e: NavEntry | undefined): Session | undefined =>
+  e === undefined ? undefined : e.kind === "session" ? e.session : e.sessions[0]
+
+// Tab order: favorites first, then tabs cluster by color group so related
+// sessions sit next to each other, original order kept within each run. Stable,
+// and re-applied on every add / tag / favorite toggle.
+const sortSessions = (list: Session[]): Session[] =>
   list
     .map((s, i) => [s, i] as const)
-    .sort((a, b) => ((b[0].favorite ? 1 : 0) - (a[0].favorite ? 1 : 0)) || (a[1] - b[1]))
+    .sort((a, b) =>
+      ((b[0].favorite ? 1 : 0) - (a[0].favorite ? 1 : 0))
+      || (groupRank(a[0]) - groupRank(b[0]))
+      || (a[1] - b[1]))
     .map(([s]) => s)
 
 // Restore persisted tabs before the first render
@@ -104,8 +154,23 @@ function App() {
   const [themeSel, setThemeSel] = useState(0)
   const [themeEditing, setThemeEditing] = useState(false)
   const [themeEdit, setThemeEdit] = useState("")
+  // Split pane (`s`): the session shown alongside the active one. null = single
+  // pane. `activeId` is always the *focused* session — the one keystrokes reach.
+  const [splitId, setSplitId] = useState<number | null>(null)
+  // Which on-screen slot the focused session occupies: 0 = left/top,
+  // 1 = right/bottom. Panes keep their place; focus moves between them (tmux
+  // style), so Tab flips this instead of exchanging the two sessions.
+  const [focusedSlot, setFocusedSlot] = useState<0 | 1>(0)
+  // Color groups folded into a single tab (`z`). Session-local UI state.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  // Group rename (`R`): the tag color being renamed, plus its edit buffer.
+  const [groupRenaming, setGroupRenaming] = useState<string | null>(null)
+  const [groupRenameInput, setGroupRenameInput] = useState("")
+  const [splitLayout, setSplitLayout] = useState<SplitLayout>(config.behavior.splitLayout)
 
-  const termBoxRef = useRef<BoxRenderable | null>(null)
+  // One ref per slot, fixed for the life of the app — a box never changes place.
+  const slot0Ref = useRef<BoxRenderable | null>(null)
+  const slot1Ref = useRef<BoxRenderable | null>(null)
   const spawnedIds = useRef(new Set<number>())
   const activeIdRef = useRef(activeId)
   const modeRef = useRef<Mode>("normal")
@@ -122,12 +187,39 @@ function App() {
   const showStartupRef = useRef(initialState.restored)
   const pickerItemsRef = useRef<Array<{ cwd: string; session: Session }>>([])
   const pickerIdxRef = useRef(0)
+  const splitIdRef = useRef<number | null>(null)
+  const focusedSlotRef = useRef<0 | 1>(0)
+  const splitLayoutRef = useRef<SplitLayout>(config.behavior.splitLayout)
+  // The nav entries the tab bar shows, mirrored for the input-handler closure.
+  // highlightedIdx indexes THIS, not the session list — a collapsed group is one
+  // entry covering several sessions. Refreshed on every render.
+  const navEntriesRef = useRef<NavEntry[]>(buildNav(initialState.sessions, new Set()))
+  const collapsedRef = useRef<Set<string>>(new Set())
+  const groupRenamingRef = useRef<string | null>(null)
+  const groupRenameInputRef = useRef("")
   const themeEditingRef = useRef(false)
   useEffect(() => { themeEditingRef.current = themeEditing }, [themeEditing])
   useEffect(() => { showStartupRef.current = showStartup }, [showStartup])
   useEffect(() => { pickerItemsRef.current = pickerItems }, [pickerItems])
   useEffect(() => { pickerIdxRef.current = pickerIdx }, [pickerIdx])
-  useEffect(() => { activeIdRef.current = activeId; setActiveSession(activeId) }, [activeId])
+  useEffect(() => { activeIdRef.current = activeId }, [activeId])
+  useEffect(() => { splitIdRef.current = splitId }, [splitId])
+  useEffect(() => { focusedSlotRef.current = focusedSlot }, [focusedSlot])
+  useEffect(() => { collapsedRef.current = collapsed }, [collapsed])
+  useEffect(() => { groupRenamingRef.current = groupRenaming }, [groupRenaming])
+  useEffect(() => { groupRenameInputRef.current = groupRenameInput }, [groupRenameInput])
+  // Both panes of a split are on screen, so neither may raise an attention flag.
+  useEffect(() => {
+    setVisibleSessions(splitId === null ? [activeId] : [activeId, splitId])
+  }, [activeId, splitId])
+  // Backstop: the same session in both panes would give one PTY two boxes
+  // fighting over its size. Any path that focuses the split half closes it.
+  useEffect(() => {
+    if (splitId !== null && splitId === activeId) {
+      setSplitId(null); splitIdRef.current = null
+      setFocusedSlot(0); focusedSlotRef.current = 0
+    }
+  }, [activeId, splitId])
   useEffect(() => { modeRef.current = mode }, [mode])
   useEffect(() => { sessionsRef.current = sessions }, [sessions])
   useEffect(() => { highlightedIdxRef.current = highlightedIdx }, [highlightedIdx])
@@ -187,6 +279,16 @@ function App() {
     return () => { renderer.off("resize", onResize) }
   }, [])
 
+  // Which session each slot paints. Tab flips `focusedSlot` and swaps
+  // activeId/splitId together, so these two stay put — focus moves, panes don't.
+  const slot0Id = splitId === null ? activeId : focusedSlot === 0 ? activeId : splitId
+  const slot1Id = splitId === null ? null : focusedSlot === 0 ? splitId : activeId
+
+  // The box the focused session lives in — needed by the respawn paths, which
+  // must resize the PTY to whichever slot it currently occupies.
+  const focusedBox = (): BoxRenderable | null =>
+    splitIdRef.current !== null && focusedSlotRef.current === 1 ? slot1Ref.current : slot0Ref.current
+
   // ── Sync PTY dimensions with terminal box ──────────────────────────────────
 
   const syncSession = useCallback((id: number, w: number, h: number) => {
@@ -212,18 +314,37 @@ function App() {
 
   // ── Paint xterm buffer into opentui box ────────────────────────────────────
 
+  // Slot 0 (left/top) — always mounted. splitId/splitLayout are deps because
+  // opening or reorienting a split resizes this box, and the PTY must follow.
+  // Note Tab changes neither slot id, so switching focus costs no resize.
   useEffect(() => {
-    const box = termBoxRef.current
+    const box = slot0Ref.current
     if (!box) return
+    const id = slot0Id
 
-    box.renderAfter = (buffer) => paintXterm(buffer, box, ptySessions.get(activeId)?.xterm)
+    box.renderAfter = (buffer) => paintXterm(buffer, box, ptySessions.get(id)?.xterm)
 
-    const onResized = () => syncSession(activeId, box.width, box.height)
+    const onResized = () => syncSession(id, box.width, box.height)
     box.on(LayoutEvents.RESIZED, onResized)
-    if (box.width > 0 && box.height > 0) syncSession(activeId, box.width, box.height)
+    if (box.width > 0 && box.height > 0) syncSession(id, box.width, box.height)
     renderer.requestRender()
     return () => { box.off(LayoutEvents.RESIZED, onResized) }
-  }, [activeId, syncSession, showStartup])
+  }, [slot0Id, syncSession, showStartup, splitId, splitLayout])
+
+  // Slot 1 (right/bottom) — mounted only while a split is open.
+  useEffect(() => {
+    const box = slot1Ref.current
+    if (!box || slot1Id === null) return
+    const id = slot1Id
+
+    box.renderAfter = (buffer) => paintXterm(buffer, box, ptySessions.get(id)?.xterm)
+
+    const onResized = () => syncSession(id, box.width, box.height)
+    box.on(LayoutEvents.RESIZED, onResized)
+    if (box.width > 0 && box.height > 0) syncSession(id, box.width, box.height)
+    renderer.requestRender()
+    return () => { box.off(LayoutEvents.RESIZED, onResized) }
+  }, [slot1Id, syncSession, showStartup, splitLayout])
 
   // ── Scroll + clipboard ─────────────────────────────────────────────────────
 
@@ -253,6 +374,8 @@ function App() {
     const id = Date.now()
     setSessions([{ id, name: "Session 1", claudeSessionId: freshSessionId(), cwd: process.cwd() }])
     setActiveId(id)
+    setSplitId(null); splitIdRef.current = null
+    setFocusedSlot(0); focusedSlotRef.current = 0
     setHighlightedIdx(0)
     setShowStartup(false)
   }
@@ -260,9 +383,20 @@ function App() {
   // ── Session lifecycle ──────────────────────────────────────────────────────
 
   const openSession = (idx: number) => {
-    const s = sessionsRef.current[idx]
-    if (!s) return
-    setActiveId(s.id)
+    const e = navEntriesRef.current[idx]
+    if (!e) return
+    // Opening a folded group unfolds it and lands on its first member.
+    if (e.kind === "group") { setGroupCollapsed(e.color, false); focusSession(e.sessions[0].id); return }
+    focusSession(e.session.id)
+  }
+
+  // Make `id` the focused pane. If it's already the other half of a split, swap
+  // the panes instead of pulling the same session into both.
+  const focusSession = (id: number) => {
+    if (id === activeIdRef.current) return
+    if (splitIdRef.current === id) { focusOtherPane(); return }
+    setActiveId(id)
+    activeIdRef.current = id
   }
 
   // Enter INSERT mode. If mouse was toggled off (m-mode), turn it back on so the
@@ -276,14 +410,23 @@ function App() {
     const id = Date.now()
     setSessions(prev => {
       const taken = new Set(prev.map(s => s.claudeSessionId))
-      const next = sortByFavorite([
+      const next = sortSessions([
         ...prev,
         { id, name: `Session ${++sessionCounter}`, claudeSessionId: freshSessionId(taken), cwd: process.cwd() },
       ])
-      setHighlightedIdx(next.findIndex(s => s.id === id))
+      setHighlightedIdx(entryIdxOf(next, id))
       return next
     })
     setActiveId(id)
+  }
+
+  // Index of the nav entry holding a session — the tab itself when its group is
+  // expanded, otherwise the collapsed group standing in for it. 0 if not shown.
+  const entryIdxOf = (list: Session[], id: number): number => {
+    const entries = buildNav(filterSessions(list, searchQueryRef.current), collapsedRef.current)
+    const idx = entries.findIndex(e =>
+      e.kind === "session" ? e.session.id === id : e.sessions.some(x => x.id === id))
+    return idx < 0 ? 0 : idx
   }
 
   // ── Cross-project picker ───────────────────────────────────────────────────
@@ -311,44 +454,58 @@ function App() {
     if (!taken) return // another instance grabbed it since the list loaded
     const id = Date.now() // fresh local id; source ids may collide with ours
     setSessions(prev => {
-      const next = sortByFavorite([...prev, { ...taken, id }])
-      setHighlightedIdx(next.findIndex(s => s.id === id))
+      const next = sortSessions([...prev, { ...taken, id }])
+      setHighlightedIdx(entryIdxOf(next, id))
       return next
     })
     setActiveId(id)
   }
 
   // Swap the highlighted tab with its neighbor. Only within the same favorite
-  // group — sortByFavorite re-imposes favorites-first on every add/toggle, so a
-  // cross-boundary move would silently snap back later.
+  // *and* color group — sortSessions re-imposes both orderings on every
+  // add/tag/toggle, so a cross-boundary move would silently snap back later.
   const moveSession = (delta: -1 | 1) => {
+    const entries = navEntriesRef.current
     const idx = highlightedIdxRef.current
-    const target = idx + delta
+    // Only plain tabs reorder; a folded group is moved by unfolding it first.
+    const ea = entries[idx], eb = entries[idx + delta]
+    if (ea?.kind !== "session" || eb?.kind !== "session") return
+    const a = ea.session, b = eb.session
+    if (!!a.favorite !== !!b.favorite) return
+    if (a.color !== b.color) return
     setSessions(prev => {
-      if (target < 0 || target >= prev.length) return prev
-      if (!!prev[idx].favorite !== !!prev[target].favorite) return prev
+      // Swap in the full list — the two tabs are adjacent in the filtered view
+      // but may not be in the underlying order.
+      const ia = prev.findIndex(s => s.id === a.id)
+      const ib = prev.findIndex(s => s.id === b.id)
+      if (ia < 0 || ib < 0) return prev
       const next = [...prev]
-      ;[next[idx], next[target]] = [next[target], next[idx]]
-      setHighlightedIdx(target)
+      ;[next[ia], next[ib]] = [next[ib], next[ia]]
+      setHighlightedIdx(idx + delta)
       return next
     })
   }
 
   // Cycle the highlighted tab's color tag through TAG_COLORS (wraps to no tag).
+  // Re-sorts, since a tag change moves the tab into its group's run — the
+  // highlight follows it rather than staying on whatever slid into its place.
   const cycleColor = (id: number) => {
-    setSessions(prev => prev.map(s => {
-      if (s.id !== id) return s
-      const idx = TAG_COLORS.indexOf(s.color)
-      return { ...s, color: TAG_COLORS[(idx + 1) % TAG_COLORS.length] }
-    }))
+    setSessions(prev => {
+      const next = sortSessions(prev.map(s => {
+        if (s.id !== id) return s
+        const idx = TAG_COLORS.indexOf(s.color)
+        return { ...s, color: TAG_COLORS[(idx + 1) % TAG_COLORS.length] }
+      }))
+      setHighlightedIdx(entryIdxOf(next, id))
+      return next
+    })
   }
 
   const toggleFavorite = (id: number) => {
     setSessions(prev => {
-      const sorted = sortByFavorite(prev.map(s => s.id === id ? { ...s, favorite: !s.favorite } : s))
+      const sorted = sortSessions(prev.map(s => s.id === id ? { ...s, favorite: !s.favorite } : s))
       // keep the highlight on the session that was just toggled
-      const newIdx = sorted.findIndex(s => s.id === id)
-      if (newIdx >= 0) setHighlightedIdx(newIdx)
+      setHighlightedIdx(entryIdxOf(sorted, id))
       return sorted
     })
   }
@@ -359,14 +516,116 @@ function App() {
     if (sessionsRef.current.length <= 1) return
     killSession(id)
     spawnedIds.current.delete(id)
+    if (splitIdRef.current === id) {
+      setSplitId(null); splitIdRef.current = null
+      setFocusedSlot(0); focusedSlotRef.current = 0
+    }
     setSessions(prev => {
       const rest = prev.filter(s => s.id !== id)
-      if (activeId === id && rest.length > 0) setActiveId(rest[0].id)
-      setHighlightedIdx(i => Math.min(i, rest.length - 1))
+      if (activeIdRef.current === id && rest.length > 0) {
+        // Prefer whatever is still visible under the current filter, and skip
+        // the split half so the two panes don't collapse onto one session.
+        const vis = filterSessions(rest, searchQueryRef.current)
+        const pool = vis.length > 0 ? vis : rest
+        const next = (pool.find(x => x.id !== splitIdRef.current) ?? pool[0]).id
+        if (next === splitIdRef.current) {
+          setSplitId(null); splitIdRef.current = null
+          setFocusedSlot(0); focusedSlotRef.current = 0
+        }
+        setActiveId(next)
+        activeIdRef.current = next
+      }
+      const visCount = filterSessions(rest, searchQueryRef.current).length
+      setHighlightedIdx(i => Math.max(0, Math.min(i, visCount - 1)))
       return rest
     })
   }
 
+
+  // ── Split pane ─────────────────────────────────────────────────────────────
+
+  // Open a second pane beside the focused one (or close it if already open).
+  // Splits with the highlighted tab when that isn't the focused session, else
+  // with whatever other session is nearest to hand.
+  const toggleSplit = () => {
+    // Closing keeps the focused session and collapses it back into slot 0.
+    if (splitIdRef.current !== null) {
+      setSplitId(null); splitIdRef.current = null
+      setFocusedSlot(0); focusedSlotRef.current = 0
+      return
+    }
+    const list = sessionsRef.current
+    if (list.length < 2) return
+    const active = activeIdRef.current
+    const hl = entrySession(navEntriesRef.current[highlightedIdxRef.current])
+    const pick = hl && hl.id !== active ? hl : list.find(s => s.id !== active)
+    if (!pick) return
+    // The session you were on stays where it is (slot 0); the new pane opens
+    // beside it and focus stays put — Tab is one key away.
+    setSplitId(pick.id); splitIdRef.current = pick.id
+    setFocusedSlot(0); focusedSlotRef.current = 0
+  }
+
+  // Move keyboard focus to the other pane, tmux style: the two sessions swap
+  // roles (focused ↔ split) *and* the focused slot flips, which cancels out —
+  // each pane keeps its place on screen, only the border and input target move.
+  const focusOtherPane = () => {
+    const other = splitIdRef.current
+    if (other === null) return
+    const active = activeIdRef.current
+    setSplitId(active); splitIdRef.current = active
+    setActiveId(other); activeIdRef.current = other
+    const slot: 0 | 1 = focusedSlotRef.current === 0 ? 1 : 0
+    setFocusedSlot(slot); focusedSlotRef.current = slot
+    setHighlightedIdx(entryIdxOf(sessionsRef.current, other))
+  }
+
+  // Flip between side-by-side and stacked panes; the choice is persisted.
+  const cycleSplitLayout = () => {
+    // Read through the ref: the input handler is registered once, so closing
+    // over `splitLayout` state would pin this to the first render's value.
+    const next: SplitLayout = splitLayoutRef.current === "side-by-side" ? "stacked" : "side-by-side"
+    setSplitLayout(next)
+    splitLayoutRef.current = next
+    setBehavior("splitLayout", next)
+  }
+
+  // ── Group fold ─────────────────────────────────────────────────────────────
+
+  const setGroupCollapsed = (color: string, value: boolean) => {
+    const next = new Set(collapsedRef.current)
+    if (value) next.add(color)
+    else next.delete(color)
+    collapsedRef.current = next
+    setCollapsed(next)
+  }
+
+  // Fold/unfold the group the highlight is on — whether that's a member tab or
+  // the folded group's own entry. Keeps the highlight on the same group.
+  const toggleGroupFold = () => {
+    const e = navEntriesRef.current[highlightedIdxRef.current]
+    if (!e) return
+    const color = e.kind === "group" ? e.color : e.group
+    if (!color) return
+    const nowCollapsed = e.kind !== "group"
+    setGroupCollapsed(color, nowCollapsed)
+    // The entry list changes shape; re-find where this group landed.
+    const anchor = entrySession(e)
+    if (anchor) setHighlightedIdx(entryIdxOf(sessionsRef.current, anchor.id))
+  }
+
+  // Rename the group the highlight sits in — whether that's a member tab or a
+  // folded group's own entry. Prefilled with the current name, blank for an
+  // unnamed group (so you type over "group 3" rather than editing it).
+  const openGroupRename = () => {
+    const e = navEntriesRef.current[highlightedIdxRef.current]
+    if (!e) return
+    const color = e.kind === "group" ? e.color : e.group
+    if (!color) return
+    const idx = TAG_COLORS.indexOf(color)
+    setGroupRenaming(color)
+    setGroupRenameInput(idx > 0 ? config.groups[String(idx)] ?? "" : "")
+  }
 
   // ── Keyboard handler ───────────────────────────────────────────────────────
 
@@ -391,7 +650,8 @@ function App() {
         const keys = Object.keys(sessionEnv.get(id) ?? {})
         const respawn = () => {
           // Respawn so the env change takes effect; --resume keeps the conversation.
-          const box = termBoxRef.current
+          // Resize to whichever slot this session currently occupies.
+          const box = focusedBox()
           killSession(id)
           spawnedIds.current.delete(id)
           if (box && box.width > 0 && box.height > 0) syncSession(id, box.width, box.height)
@@ -434,6 +694,24 @@ function App() {
         return true
       }
 
+      if (groupRenamingRef.current !== null) {
+        if (seq === "\r") {
+          const idx = TAG_COLORS.indexOf(groupRenamingRef.current)
+          // Empty input clears the override, falling back to "group N".
+          if (idx > 0) setGroupName(idx, groupRenameInputRef.current)
+          setGroupRenaming(null)
+          setGroupRenameInput("")
+          // config.groups lives outside React — nudge a repaint.
+          setTerminalUpdate(n => n + 1)
+          renderer.requestRender()
+          return true
+        }
+        if (seq === "\x1b") { setGroupRenaming(null); setGroupRenameInput(""); return true }
+        if (seq === "\x7f" || seq === "\b") { setGroupRenameInput(s => s.slice(0, -1)); return true }
+        if (seq.length === 1 && seq.charCodeAt(0) >= 32) { setGroupRenameInput(s => s + seq); return true }
+        return true
+      }
+
       if (renamingRef.current !== null) {
         if (seq === "\r") {
           setSessions(prev => prev.map(s => s.id === renamingRef.current ? { ...s, name: renameInputRef.current } : s))
@@ -460,11 +738,11 @@ function App() {
       if (seq === "\r") {
         const id = activeIdRef.current
         const ps = ptySessions.get(id)
-        const onActiveTab = sessionsRef.current[highlightedIdxRef.current]?.id === id
+        const onActiveTab = entrySession(navEntriesRef.current[highlightedIdxRef.current])?.id === id
         if (ps?.exited && (modeRef.current === "insert" || onActiveTab)) {
           killSession(id)
           spawnedIds.current.delete(id)
-          const box = termBoxRef.current
+          const box = focusedBox()
           if (box && box.width > 0 && box.height > 0) syncSession(id, box.width, box.height)
           return true
         }
@@ -473,22 +751,31 @@ function App() {
       const mode = modeRef.current
 
       if (mode === "normal") {
-        const len = sessionsRef.current.length
+        // Navigation indexes the nav-entry list, so a search never leaves the
+        // highlight on a hidden tab and a folded group counts as one stop.
+        const entries = navEntriesRef.current
+        const hl = entrySession(entries[highlightedIdxRef.current])
+        const len = entries.length
         if (seq === "l" || seq === "\x1b[C") { setHighlightedIdx(i => Math.min(i + 1, len - 1)); return true }
         if (seq === "h" || seq === "\x1b[D") { setHighlightedIdx(i => Math.max(i - 1, 0)); return true }
         if (seq === "L") { moveSession(1); return true }
         if (seq === "H") { moveSession(-1); return true }
         if (seq === "\r" || seq === " ") { openSession(highlightedIdxRef.current); return true }
         if (seq === "i" || seq === "a") { enterInsert(); return true }
-        if (seq === "r") { const s = sessionsRef.current[highlightedIdxRef.current]; if (s) { setRenaming(s.id); setRenameInput(s.name); } return true }
+        if (seq === "r") { if (hl) { setRenaming(hl.id); setRenameInput(hl.name) } return true }
         if (seq === "e") { setEnvModal(activeIdRef.current); setEnvInput(""); setEnvSel(-1); return true }
-        if (seq === "*") { const s = sessionsRef.current[highlightedIdxRef.current]; if (s) toggleFavorite(s.id); return true }
-        if (seq === "c") { const s = sessionsRef.current[highlightedIdxRef.current]; if (s) cycleColor(s.id); return true }
+        if (seq === "*") { if (hl) toggleFavorite(hl.id); return true }
+        if (seq === "c") { if (hl) cycleColor(hl.id); return true }
+        if (seq === "z") { toggleGroupFold(); return true }
+        if (seq === "R") { openGroupRename(); return true }
+        if (seq === "s") { toggleSplit(); return true }
+        if (seq === "S") { cycleSplitLayout(); return true }
+        if (seq === "\t" && splitIdRef.current !== null) { focusOtherPane(); return true }
         if (seq === "t") { setThemeSel(Math.max(0, themeNames.indexOf(config.theme))); setThemeEditing(false); setThemeEdit(""); setThemeModalOpen(true); return true }
         if (seq === "/") { setSearching(true); setSearchQuery(""); return true }
         if (seq === "n") { addSession(); return true }
         if (seq === "o") { openPicker(); return true }
-        if (seq === "d") { setDeleteConfirm(sessionsRef.current[highlightedIdxRef.current]?.id ?? null); return true }
+        if (seq === "d") { setDeleteConfirm(hl?.id ?? null); return true }
         if (seq === "m") { const next = !renderer.useMouse; renderer.useMouse = next; setMouseEnabled(next); return true }
         if (seq === "?") { setShowHelp(v => !v); return true }
         if ("123456789".includes(seq)) { const idx = parseInt(seq) - 1; if (idx < len) { setHighlightedIdx(idx); openSession(idx); } return true }
@@ -629,6 +916,11 @@ function App() {
   const activeName = activeSession?.name ?? ""
   const isInsert = mode === "insert"
   const activeStatus: SessionStatus = activity.get(activeId) ? "working" : waiting.get(activeId) ? "waiting" : "idle"
+  const splitSession = splitId === null ? undefined : sessions.find(s => s.id === splitId)
+  const nameOf = (id: number | null) => (id === null ? "" : sessions.find(s => s.id === id)?.name ?? "")
+  // One filtered list drives both the tab bar and NORMAL-mode navigation.
+  const navEntries = buildNav(filterSessions(sessions, searchQuery), collapsed)
+  navEntriesRef.current = navEntries
 
   return (
     <box style={{ flexDirection: "column", width: "100%", height: "100%" }}>
@@ -645,11 +937,12 @@ function App() {
         )}
         <box style={{ flexGrow: 1, height: "100%" }}>
           <SessionList
-            sessions={searching || searchQuery ? sessions.filter(s => s.name.toLowerCase().includes(searchQuery.toLowerCase())) : sessions}
+            entries={navEntries}
             activeId={activeId}
+            splitId={splitId}
             highlightedIdx={highlightedIdx}
             isInsert={isInsert}
-            onSelect={(s, i) => { setActiveId(s.id); setHighlightedIdx(i); activeIdRef.current = s.id }}
+            onSelect={(i) => { setHighlightedIdx(i); openSession(i) }}
             onDelete={id => setDeleteConfirm(id)}
             onAdd={addSession}
             renaming={renaming}
@@ -665,16 +958,37 @@ function App() {
         </box>
       </box>
 
-      <box style={{ flexGrow: 1, flexDirection: "column" }}>
+      <box style={{ flexGrow: 1, flexDirection: splitId !== null && splitLayout === "side-by-side" ? "row" : "column" }}>
         <TerminalView
-          title={activeName}
+          title={nameOf(slot0Id)}
           mouseEnabled={mouseEnabled}
-          termBoxRef={termBoxRef}
-          onMouseDown={() => enterInsert()}
+          termBoxRef={slot0Ref}
+          split={splitId !== null}
+          focused={focusedSlot === 0 || splitId === null}
+          onMouseDown={() => { if (splitId !== null && focusedSlot === 1) focusOtherPane(); enterInsert() }}
         />
+        {slot1Id !== null && (
+          <TerminalView
+            title={nameOf(slot1Id)}
+            mouseEnabled={mouseEnabled}
+            termBoxRef={slot1Ref}
+            split
+            focused={focusedSlot === 1}
+            onMouseDown={() => { if (focusedSlot === 0) focusOtherPane(); enterInsert() }}
+          />
+        )}
       </box>
 
-      <StatusBar mode={mode} activeName={activeName} activeCwd={activeSession?.cwd} activeBranch={activeId != null ? branches.get(activeId) : undefined} activeStatus={activeStatus} />
+      <StatusBar
+        mode={mode}
+        activeName={activeName}
+        activeCwd={activeSession?.cwd}
+        activeBranch={activeId != null ? branches.get(activeId) : undefined}
+        activeStatus={activeStatus}
+        splitName={splitSession?.name}
+        groupName={groupName(activeSession?.color) || undefined}
+        groupColor={activeSession?.color}
+      />
 
       {deleteConfirm !== null && (
         <DeleteConfirmModal
@@ -703,6 +1017,16 @@ function App() {
       {searching && <SearchModal query={searchQuery} onQueryChange={setSearchQuery} />}
 
       {renaming !== null && <RenameModal input={renameInput} onInputChange={setRenameInput} />}
+
+      {groupRenaming !== null && (
+        <RenameModal
+          input={groupRenameInput}
+          onInputChange={setGroupRenameInput}
+          title={`Rename group ${TAG_COLORS.indexOf(groupRenaming)}`}
+          color={groupRenaming}
+          hint="Type new name · Enter to save · empty clears it · Esc to cancel"
+        />
+      )}
 
       {envModal !== null && <EnvModal input={envInput} vars={sessionEnv.get(envModal) ?? {}} selected={envSel} />}
 

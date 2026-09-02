@@ -11,7 +11,12 @@ const HELP_LINES = [
   ["r", "rename session"],
   ["e", "session env vars: type KEY=VALUE to add, ↑↓+r to remove (respawns claude)"],
   ["*", "star/unstar session (sorts to front)"],
-  ["c", "cycle session color tag"],
+  ["c", "cycle color tag — same-tag tabs nest under one group tab"],
+  ["z", "fold / unfold the highlighted tab's group"],
+  ["R", "rename the highlighted tab's group (empty clears the name)"],
+  ["s", "split pane with the highlighted session (again to close)"],
+  ["S", "flip split layout (side-by-side ↔ stacked)"],
+  ["Tab", "focus the other pane (panes stay put, tmux style)"],
   ["t", "theme menu (presets + accent color)"],
   ["/", "search sessions"],
   ["Esc", "normal mode / forward to Claude"],
@@ -32,6 +37,9 @@ const LEGEND = [
   ["●", "#4FC3F7", "waiting for your input"],
   ["●", "#FFD700", "wants attention (finished on another tab)"],
   ["○", "#444444", "idle"],
+  ["◧", "#FFA500", "shown in the other split pane"],
+  ["▸", "#BD93F9", "folded group — its dot is the loudest of its members"],
+  ["▶", "#00BFFF", "keyboard cursor (filled tab = active / highlighted)"],
 ]
 
 // Show the config path with the home directory collapsed to ~ for brevity.
@@ -41,7 +49,8 @@ const CONFIG_LINES = [
   ["theme", "dark / light / solarized (a colors override wins per-key)"],
   ["colors", "active / highlight / attention / waiting / busy / branch / cwd …"],
   ["timing", "idleMs, waitingMs (idle → “waiting”), gitPollMs"],
-  ["behavior", "showCwd, showBranch"],
+  ["behavior", "showCwd, showBranch, splitLayout"],
+  ["groups", "names for the color groups, keyed \"1\"–\"7\" (shown in status bar)"],
 ]
 
 export function HelpModal() {
