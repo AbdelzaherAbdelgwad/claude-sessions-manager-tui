@@ -154,3 +154,83 @@ export function editorCommand(file: string): EditorCommand | null {
   const waits = parts.some(p => p === "-w" || p === "--wait")
   return { argv: [...parts, file], gui: GUI_EDITORS.has(bin.toLowerCase()) && !waits }
 }
+
+// ── Worktrees ───────────────────────────────────────────────────────────────
+//
+// A git worktree is a second working directory backed by the same repository,
+// checked out to a different branch. Sessions already carry their own cwd and
+// resume there, so one worktree per session lets agents work on separate
+// branches at once without editing each other's files.
+
+// Absolute path to the top of the working tree, or null outside a repo.
+export async function repoRoot(cwd: string): Promise<string | null> {
+  const out = await git(cwd, ["rev-parse", "--show-toplevel"])
+  return out ? out.trim() || null : null
+}
+
+// True when `branch` already exists locally, which decides whether the worktree
+// checks it out or creates it.
+export async function branchExists(cwd: string, branch: string): Promise<boolean> {
+  try {
+    const r = await Bun.$`git -C ${cwd} show-ref --verify --quiet ${"refs/heads/" + branch}`.quiet().nothrow()
+    return r.exitCode === 0
+  } catch {
+    return false
+  }
+}
+
+// Directory name for a branch: slashes can't be a single path segment, and a
+// leading dot would hide the directory.
+export function worktreeSlug(branch: string): string {
+  return branch.replace(/[\/\\]+/g, "-").replace(/^[.]+/, "").trim() || "worktree"
+}
+
+// Where a worktree for `branch` goes: `<root>/<repo>-<slug>`, where root is the
+// configured directory or, by default, the repository's parent.
+export function worktreePath(root: string, branch: string, base?: string): string {
+  const name = root.split("/").filter(Boolean).pop() ?? "repo"
+  const parent = base && base.length > 0 ? base : root.slice(0, root.lastIndexOf("/")) || "/"
+  return `${parent}/${name}-${worktreeSlug(branch)}`
+}
+
+// A single shape rather than a discriminated union: this project compiles
+// without `strict`, and narrowing on `ok` needs strictNullChecks.
+export interface WorktreeResult {
+  ok: boolean
+  path?: string
+  error?: string
+}
+
+// Create a worktree for `branch`, creating the branch itself when it's new.
+export async function addWorktree(cwd: string, branch: string, path: string): Promise<WorktreeResult> {
+  if (await Bun.file(path).exists()) return { ok: false, error: `${path} already exists` }
+  const exists = await branchExists(cwd, branch)
+  // -b makes the branch; without it the existing branch is checked out, which
+  // fails if another worktree already holds it.
+  const args = exists ? ["worktree", "add", path, branch] : ["worktree", "add", "-b", branch, path]
+  try {
+    const r = await Bun.$`git -C ${cwd} ${args}`.quiet().nothrow()
+    if (r.exitCode !== 0) {
+      const err = (r.stderr.toString() || r.stdout.toString()).trim().split("\n").pop() ?? "git worktree add failed"
+      return { ok: false, error: err }
+    }
+    return { ok: true, path }
+  } catch {
+    return { ok: false, error: "could not run git" }
+  }
+}
+
+// Remove a worktree. Never forces: git refuses while the tree is dirty, and
+// that refusal is the point — it is an agent's unsaved work.
+export async function removeWorktree(cwd: string, path: string): Promise<WorktreeResult> {
+  try {
+    const r = await Bun.$`git -C ${cwd} worktree remove ${path}`.quiet().nothrow()
+    if (r.exitCode !== 0) {
+      const err = (r.stderr.toString() || r.stdout.toString()).trim().split("\n").pop() ?? "git worktree remove failed"
+      return { ok: false, error: err }
+    }
+    return { ok: true, path }
+  } catch {
+    return { ok: false, error: "could not run git" }
+  }
+}

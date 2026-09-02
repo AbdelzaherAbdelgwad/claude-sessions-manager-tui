@@ -12,6 +12,7 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - **Tab-bar overflow** — when tabs exceed the terminal width, they window around the highlighted one with `‹N` / `N›` chevrons showing how many are hidden (click a chevron to reveal them)
 - **Status-bar context** — the bottom bar shows the active session's directory, git branch, and live state (`working…` / `waiting for input`)
 - **Uncommitted-changes marker** — a `✱` on any tab whose worktree is dirty, so you can see which agent actually wrote files
+- **Worktree sessions** — `w` creates a git worktree for a branch and opens a session in it, so several agents can work on different branches of one repo at once without touching each other's files
 - **Changes panel** — `v` opens a side panel listing the changed files in the active session's directory, with per-file `+`/`-` counts; `j`/`k` pick a file and Enter opens it in `$EDITOR`
 - **Split pane** — press `s` to watch two sessions at once (side by side or stacked, `S` flips); `Tab` moves keyboard focus between them
 - **Configurable** — theme presets, colors, timing thresholds, and display toggles via `~/.claude-sessions-manager/config.json`
@@ -107,6 +108,7 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 | `H` / `L` | Move highlighted session left / right |
 | `i` / `a` | Enter INSERT mode |
 | `n` | New session |
+| `w` | New session in a fresh git worktree (prompts for a branch) |
 | `d` | Delete highlighted session (with confirmation) |
 | `Ctrl+C` | Delete active session (with confirmation) |
 | `Ctrl+D` | Quit |
@@ -309,6 +311,26 @@ Each session tracks the git state of its own directory.
 - `v` opens a **changes panel** beside the terminal, listing the changed paths in the active session's directory with their status codes and per-file `+`/`-` counts, plus a total. Untracked files are listed too.
 - In the panel, `j`/`k` move a file cursor and Enter opens that file in your editor (clicking a row does both). `Esc` deselects. Until you pick a file the cursor is unset, so Enter still opens the highlighted session — the panel only claims the key once you're actually in the list.
 
+### Worktree sessions
+
+`w` prompts for a branch name, creates a git worktree for it, and opens a
+session running there:
+
+```
+~/proj              main       ← session 1
+~/proj-authfix      authfix    ← session 2, its own checkout
+~/proj-refactor     refactor   ← session 3
+```
+
+A worktree is a second working directory backed by the same repository, so all
+three share one `.git` but have separate files and separate checked-out
+branches. Agents can then run in parallel without editing the same tree.
+
+- An existing branch is checked out; a new name creates the branch. The modal says which as you type.
+- Worktrees land beside the repository as `<repo>-<branch>`, with `/` in a branch name flattened to `-`. Set `behavior.worktreeRoot` to collect them somewhere else instead.
+- The new session inherits the colour tag of the session you pressed `w` on, so worktrees of a repo you've already grouped join that group.
+- Deleting a worktree tab offers `w` to remove the worktree as well. That is **refused while the tree has uncommitted changes** — it's an agent's unsaved work — and the reason appears in the status bar. Plain `y` always just closes the tab and leaves the directory alone.
+
 ### Opening a file
 
 The editor comes from `$VISUAL`, then `$EDITOR`, falling back to whichever of
@@ -367,7 +389,7 @@ On first run, `csm` writes a config file with defaults to `~/.claude-sessions-ma
 | `theme` | `dark`, `light`, `solarized` | A named color preset used as the base palette |
 | `colors` | `active`, `highlight`, `attention`, `waiting`, `busy`, `idleDot`, `name`, `border`, `branch`, `cwd`, `dirty`, `deleted` | Hex colors for tab, status-bar and changes-panel elements |
 | `timing` | `idleMs`, `waitingMs`, `gitPollMs` | Silence before the spinner stops; sustained silence before a turn counts as "waiting for input"; how often git branches are re-read |
-| `behavior` | `showCwd`, `showBranch`, `splitLayout`, `showDirty` | Toggle the directory / git branch in the status bar and the `✱` dirty markers; `splitLayout` is `"side-by-side"` or `"stacked"` (also set by `S`) |
+| `behavior` | `showCwd`, `showBranch`, `splitLayout`, `showDirty`, `worktreeRoot` | Toggle the directory / git branch in the status bar and the `✱` dirty markers; `splitLayout` is `"side-by-side"` or `"stacked"` (also set by `S`); `worktreeRoot` is where `w` puts new worktrees (default: beside the repo) |
 | `groups` | `"1"` – `"7"` | Display names for the color groups, keyed by tag index in the order `c` cycles them; titles the group tab and shows in the status bar |
 
 `theme` picks the base palette; any keys you set under `colors` **override the theme per-key**, so a custom color always wins over the preset.

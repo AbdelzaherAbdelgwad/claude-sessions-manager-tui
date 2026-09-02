@@ -16,9 +16,11 @@ interface Props {
   groupColor?: string
   // Active session's worktree has uncommitted changes.
   dirty?: boolean
+  // Transient message; outranks the group tag while it is showing.
+  notice?: string
 }
 
-export function StatusBar({ mode, activeName, activeCwd, activeBranch, activeStatus, splitName, groupName, groupColor, dirty }: Props) {
+export function StatusBar({ mode, activeName, activeCwd, activeBranch, activeStatus, splitName, groupName, groupColor, dirty, notice }: Props) {
   const isInsert = mode === "insert"
   const c = config.colors
   const bg = isInsert ? "#FFA500" : "#1a1a2e"
@@ -39,7 +41,8 @@ export function StatusBar({ mode, activeName, activeCwd, activeBranch, activeSta
       {config.behavior.showBranch && activeBranch && <text style={{ fg: isInsert ? "#335500" : c.branch }}> ⎇ {activeBranch}</text>}
       {dirty && <text style={{ fg: isInsert ? "#664400" : c.dirty }}> ✱</text>}
       {status && <text style={{ fg: isInsert ? "#333300" : status.color }}>  · {status.text}</text>}
-      {groupName && (
+      {notice && <text style={{ fg: isInsert ? "#664400" : c.deleted }}>  {notice}</text>}
+      {!notice && groupName && (
         <text style={{ fg: isInsert ? "#664400" : (groupColor ?? c.name) }}>{"  ▍" + groupName}</text>
       )}
       {/* flex spacer pushes the hints to the right edge (justify-between) */}

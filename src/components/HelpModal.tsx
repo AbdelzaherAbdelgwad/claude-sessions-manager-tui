@@ -27,6 +27,7 @@ const HELP_LINES = [
   ["/ or o", "session palette — fuzzy jump across every project"],
   ["Esc", "normal mode / forward to Claude"],
   ["n", "new session"],
+  ["w", "new session in a fresh git worktree (name a branch)"],
   ["d", "delete session"],
   ["PgUp / PgDn", "scroll terminal"],
   ["wheel", "scroll the pane under the pointer (and any open panel)"],

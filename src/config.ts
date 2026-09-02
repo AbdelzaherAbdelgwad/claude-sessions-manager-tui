@@ -35,6 +35,9 @@ export interface Behavior {
   showBranch: boolean
   splitLayout: SplitLayout
   showDirty: boolean   // ✱ on tabs whose worktree has uncommitted changes
+  // Directory new git worktrees are created under. Empty means alongside the
+  // repository, as a sibling named <repo>-<branch>.
+  worktreeRoot: string
 }
 
 export interface Config {
@@ -108,6 +111,7 @@ export const DEFAULTS: Config = {
     showBranch: true,
     splitLayout: "side-by-side",
     showDirty: true,
+    worktreeRoot: "",
   },
   groups: {},
 }

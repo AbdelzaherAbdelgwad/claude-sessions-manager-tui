@@ -19,7 +19,11 @@ import { PaletteModal, type PaletteItem } from "./src/components/PaletteModal"
 import { EnvModal } from "./src/components/EnvModal"
 import { ThemeModal } from "./src/components/ThemeModal"
 import { loadState, saveState, freshSessionId, loadOtherProjects, takeSession } from "./src/persistence"
-import { gitBranch, gitDirty, gitChanges, editorCommand, type GitChanges } from "./src/gitInfo"
+import {
+  gitBranch, gitDirty, gitChanges, editorCommand, type GitChanges,
+  repoRoot, branchExists, worktreePath, addWorktree, removeWorktree,
+} from "./src/gitInfo"
+import { WorktreeModal } from "./src/components/WorktreeModal"
 import { fuzzyScoreFields } from "./src/fuzzy"
 import { DiffPanel } from "./src/components/DiffPanel"
 
@@ -162,6 +166,16 @@ function App() {
   const [diffSel, setDiffSel] = useState(-1)
   const [editorRunning, setEditorRunning] = useState(false)
   const [editorError, setEditorError] = useState<string | null>(null)
+  // Worktree modal (`w`): branch name for a new worktree + its own session.
+  const [worktreeOpen, setWorktreeOpen] = useState(false)
+  const [worktreeInput, setWorktreeInput] = useState("")
+  const [worktreeRoot, setWorktreeRoot] = useState<string | null>(null)
+  const [worktreeBranchExists, setWorktreeBranchExists] = useState(false)
+  const [worktreeBusy, setWorktreeBusy] = useState(false)
+  const [worktreeError, setWorktreeError] = useState<string | null>(null)
+  // Transient status-bar message (currently only git's refusal to remove a
+  // dirty worktree, which has nowhere else to appear).
+  const [statusNotice, setStatusNotice] = useState<string | null>(null)
   // Terminal width in columns, tracked so the tab bar can window on overflow.
   const [termWidth, setTermWidth] = useState(renderer.terminalWidth)
   const [termHeight, setTermHeight] = useState(renderer.terminalHeight)
@@ -216,6 +230,10 @@ function App() {
   const diffOpenRef = useRef(false)
   const diffSelRef = useRef(-1)
   const diffDataRef = useRef<GitChanges | null>(null)
+  const worktreeOpenRef = useRef(false)
+  const worktreeInputRef = useRef("")
+  const worktreeRootRef = useRef<string | null>(null)
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // The nav entries the tab bar shows, mirrored for the input-handler closure.
   // highlightedIdx indexes THIS, not the session list — a collapsed group is one
   // entry covering several sessions. Refreshed on every render.
@@ -236,6 +254,9 @@ function App() {
   useEffect(() => { diffOpenRef.current = diffOpen }, [diffOpen])
   useEffect(() => { diffSelRef.current = diffSel }, [diffSel])
   useEffect(() => { diffDataRef.current = diffData }, [diffData])
+  useEffect(() => { worktreeOpenRef.current = worktreeOpen }, [worktreeOpen])
+  useEffect(() => { worktreeInputRef.current = worktreeInput }, [worktreeInput])
+  useEffect(() => { worktreeRootRef.current = worktreeRoot }, [worktreeRoot])
   useEffect(() => { groupRenamingRef.current = groupRenaming }, [groupRenaming])
   useEffect(() => { groupRenameInputRef.current = groupRenameInput }, [groupRenameInput])
   // Both panes of a split are on screen, so neither may raise an attention flag.
@@ -259,6 +280,8 @@ function App() {
   useEffect(() => { envModalRef.current = envModal }, [envModal])
   useEffect(() => { envInputRef.current = envInput }, [envInput])
   useEffect(() => { envSelRef.current = envSel }, [envSel])
+
+  useEffect(() => () => { if (noticeTimer.current) clearTimeout(noticeTimer.current) }, [])
 
   // ── Spinner animation: tick only while some session is streaming ───────────
 
@@ -673,6 +696,35 @@ function App() {
     })
   }
 
+  // Delete the tab and also remove its worktree. git refuses while the tree is
+  // dirty, and that refusal is kept rather than forced — it is unsaved work.
+  const doDeleteWithWorktree = async (id: number) => {
+    const session = sessionsRef.current.find(s => s.id === id)
+    if (!session) return
+    const root = await repoRoot(session.cwd)
+    const result = await removeWorktree(root ?? session.cwd, session.cwd)
+    if (!result.ok) {
+      // Surface git's refusal where it will be seen, and keep the tab.
+      setDeleteConfirm(null)
+      flashNotice(result.error ?? "could not remove worktree")
+      return
+    }
+    doDelete(id)
+  }
+
+  // Messages with no permanent home in the layout get a few seconds in the
+  // status bar — git's refusal to remove a dirty worktree, mainly.
+  const flashNotice = (text: string) => {
+    setStatusNotice(text)
+    if (noticeTimer.current) clearTimeout(noticeTimer.current)
+    noticeTimer.current = setTimeout(() => {
+      setStatusNotice(null)
+      noticeTimer.current = null
+      renderer.requestRender()
+    }, 4000)
+    renderer.requestRender()
+  }
+
   const doDelete = (id: number) => {
     setDeleteConfirm(null)
     // Never delete the last session — and don't kill its PTY before knowing that
@@ -805,6 +857,71 @@ function App() {
     setGroupRenameInput(idx > 0 ? config.groups[String(idx)] ?? "" : "")
   }
 
+  // ── Worktree sessions ──────────────────────────────────────────────────────
+
+  // `w` on a session inside a repo: name a branch, get a git worktree for it
+  // and a session running there. Separate directories mean two agents can work
+  // on two branches at once without editing each other's files.
+  const openWorktreeModal = async () => {
+    const session = sessionsRef.current.find(s => s.id === activeIdRef.current)
+    if (!session) return
+    const root = await repoRoot(session.cwd)
+    if (!root) { flashNotice("not a git repository — nothing to branch from"); return }
+    setWorktreeRoot(root)
+    worktreeRootRef.current = root
+    setWorktreeInput("")
+    setWorktreeBranchExists(false)
+    setWorktreeError(null)
+    setWorktreeBusy(false)
+    setWorktreeOpen(true)
+  }
+
+  // Preview whether the typed branch already exists, so the modal can say
+  // whether it will be checked out or created.
+  useEffect(() => {
+    if (!worktreeOpen || !worktreeRoot || !worktreeInput) { setWorktreeBranchExists(false); return }
+    let cancelled = false
+    branchExists(worktreeRoot, worktreeInput).then(exists => {
+      if (!cancelled) { setWorktreeBranchExists(exists); renderer.requestRender() }
+    })
+    return () => { cancelled = true }
+  }, [worktreeOpen, worktreeRoot, worktreeInput])
+
+  const createWorktreeSession = async () => {
+    const branch = worktreeInputRef.current.trim()
+    const root = worktreeRootRef.current
+    if (!branch || !root) return
+    const path = worktreePath(root, branch, config.behavior.worktreeRoot)
+
+    setWorktreeBusy(true)
+    setWorktreeError(null)
+    const result = await addWorktree(root, branch, path)
+    setWorktreeBusy(false)
+    if (!result.ok) { setWorktreeError(result.error ?? "could not create worktree"); renderer.requestRender(); return }
+
+    setWorktreeOpen(false)
+    setWorktreeInput("")
+
+    // Inherit the parent session's colour tag, so worktrees of a repo you have
+    // already grouped join that group instead of scattering.
+    const parent = sessionsRef.current.find(s => s.id === activeIdRef.current)
+    const id = Date.now()
+    setSessions(prev => {
+      const taken = new Set(prev.map(s => s.claudeSessionId))
+      const next = sortSessions([...prev, {
+        id,
+        name: branch,
+        ...(parent?.color ? { color: parent.color } : {}),
+        worktree: true,
+        claudeSessionId: freshSessionId(taken),
+        cwd: path,
+      }])
+      setHighlightedIdx(entryIdxOf(next, id))
+      return next
+    })
+    setActiveId(id)
+  }
+
   // ── Ungroup ────────────────────────────────────────────────────────────────
 
   // Dissolve a group: clear the tag from every member so they spread back out
@@ -906,6 +1023,15 @@ function App() {
         return true
       }
 
+      if (worktreeOpenRef.current) {
+        if (seq === "\r") { createWorktreeSession(); return true }
+        if (seq === "\x1b") { setWorktreeOpen(false); setWorktreeInput(""); setWorktreeError(null); return true }
+        if (seq === "\x7f" || seq === "\b") { setWorktreeInput(v => v.slice(0, -1)); return true }
+        // Branch names have their own rules; git rejects the rest on create.
+        if (seq.length === 1 && seq.charCodeAt(0) >= 32) { setWorktreeInput(v => v + seq); return true }
+        return true
+      }
+
       if (groupRenamingRef.current !== null) {
         if (seq === "\r") {
           const idx = TAG_COLORS.indexOf(groupRenamingRef.current)
@@ -988,6 +1114,7 @@ function App() {
           return true
         }
         if (seq === "R") { openGroupRename(); return true }
+        if (seq === "w") { openWorktreeModal(); return true }
         if (seq === "s") { toggleSplit(); return true }
         if (seq === "S") { cycleSplitLayout(); return true }
         if (seq === "\t" && splitIdRef.current !== null) { focusOtherPane(); return true }
@@ -1082,8 +1209,12 @@ function App() {
 
   useEffect(() => {
     if (deleteConfirm === null) return
+    const target = sessionsRef.current.find(s => s.id === deleteConfirm)
     const handler = (seq: string) => {
       if (seq === "y" || seq === "\r") { doDelete(deleteConfirm); return true }
+      // Only offered for a worktree csm created, so `w` can't delete a
+      // directory the user set up themselves.
+      if (seq === "w" && target?.worktree) { doDeleteWithWorktree(deleteConfirm); return true }
       if (seq === "n" || seq === "\x1b") { setDeleteConfirm(null); return true }
       return true
     }
@@ -1309,12 +1440,17 @@ function App() {
         groupName={groupName(activeSession?.color) || undefined}
         groupColor={activeSession?.color}
         dirty={config.behavior.showDirty && !!dirty.get(activeId)}
+        notice={statusNotice ?? undefined}
       />
 
       {deleteConfirm !== null && (
         <DeleteConfirmModal
           sessionName={sessions.find(s => s.id === deleteConfirm)?.name ?? ""}
           isFavorite={!!sessions.find(s => s.id === deleteConfirm)?.favorite}
+          worktreePath={sessions.find(s => s.id === deleteConfirm)?.worktree
+            ? sessions.find(s => s.id === deleteConfirm)?.cwd
+            : undefined}
+          onConfirmWithWorktree={() => doDeleteWithWorktree(deleteConfirm)}
           onConfirm={() => doDelete(deleteConfirm)}
           onCancel={() => setDeleteConfirm(null)}
         />
@@ -1349,6 +1485,16 @@ function App() {
       )}
 
       {renaming !== null && <RenameModal input={renameInput} onInputChange={setRenameInput} />}
+
+      {worktreeOpen && (
+        <WorktreeModal
+          input={worktreeInput}
+          targetPath={worktreeRoot ? worktreePath(worktreeRoot, worktreeInput || "branch", config.behavior.worktreeRoot) : ""}
+          branchExists={worktreeBranchExists}
+          busy={worktreeBusy}
+          error={worktreeError ?? undefined}
+        />
+      )}
 
       {groupRenaming !== null && (
         <RenameModal
