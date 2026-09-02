@@ -28,6 +28,8 @@ interface Props {
   // The session shown in the second pane, when a split is open. It's on screen
   // too, so its tab is marked even though it isn't the focused one.
   splitId?: number | null
+  // Sessions whose worktree has uncommitted changes. Undefined disables the mark.
+  dirty?: Map<number, boolean>
 }
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -51,13 +53,13 @@ const entrySessions = (e: NavEntry): Session[] => (e.kind === "session" ? [e.ses
 // Approximate rendered width of one entry, in columns. A member of an expanded
 // group is borderless (it sits inside the container), so it costs less than a
 // standalone tab; the container's own chrome is charged to its first member.
-function entryWidth(e: NavEntry, multi: boolean, splitId: number | null | undefined, first: boolean): number {
+function entryWidth(e: NavEntry, multi: boolean, splitId: number | null | undefined, first: boolean, isDirty: boolean): number {
   if (e.kind === "group") {
     // border(2) + paddingX(2) + cursor(2) + ▸ + label + dot + count + gaps
     return 2 + 2 + 2 + 2 + e.label.length + 2 + String(e.sessions.length).length + 2 + 1
   }
   const s = e.session
-  const base = 2 /*paddingX*/ + 2 /*cursor*/ + 2 /*dot+space*/ + s.name.length
+  const base = 2 /*paddingX*/ + 2 /*cursor*/ + 2 /*dot+space*/ + s.name.length + (isDirty ? 2 : 0)
     + (s.favorite ? 2 : 0) + (multi ? 2 : 0) + (s.id === splitId ? 2 : 0) + 1 /*gap*/
   if (e.group) return base + (first ? GROUP_CHROME_W : 0)
   return base + 2 /*own border*/ + 2 /*extra paddingX*/ + (s.color ? 2 : 0)
@@ -88,13 +90,15 @@ function visibleWindow(widths: number[], focus: number, maxWidth: number, extraR
   return [start, end]
 }
 
-export function SessionList({ entries, activeId, highlightedIdx, isInsert, onSelect, onDelete, onAdd, onToggleGroup, onToggleAll, groupCount = 0, allCollapsed = false, activeSessions, attention, waiting, spinnerFrame = 0, maxWidth, splitId }: Props) {
+export function SessionList({ entries, activeId, highlightedIdx, isInsert, onSelect, onDelete, onAdd, onToggleGroup, onToggleAll, groupCount = 0, allCollapsed = false, activeSessions, attention, waiting, dirty, spinnerFrame = 0, maxWidth, splitId }: Props) {
   const c = config.colors
   const total = entries.reduce((a, e) => a + entrySessions(e).length, 0)
   const multi = total > 1
 
   const widths = entries.map((e, i) =>
-    entryWidth(e, multi, splitId, e.kind === "session" && (i === 0 || (entries[i - 1] as any).group !== e.group)))
+    entryWidth(e, multi, splitId,
+      e.kind === "session" && (i === 0 || (entries[i - 1] as any).group !== e.group),
+      e.kind === "session" && !!dirty?.get(e.session.id)))
   // The all-groups button only exists when there are groups; reserve its width.
   const showAllButton = groupCount > 0 && !!onToggleAll
   const [start, end] = visibleWindow(widths, highlightedIdx, maxWidth ?? 0, showAllButton ? 8 : 0)
@@ -158,6 +162,7 @@ export function SessionList({ entries, activeId, highlightedIdx, isInsert, onSel
         {s.favorite && <text style={{ fg: ink ?? c.attention, marginRight: 1 }}>★</text>}
         <text style={{ fg: ink ?? m.dotColor, marginRight: 1 }}>{m.glyph}</text>
         <text style={{ fg: ink ?? accent }}>{s.name}</text>
+        {dirty?.get(s.id) && <text style={{ fg: ink ?? c.dirty, marginLeft: 1 }}>✱</text>}
         {multi && (
           <text onMouseDown={e => { e.stopPropagation(); onDelete(s.id) }} style={{ fg: ink ?? "#555555", marginLeft: 1 }}>✕</text>
         )}

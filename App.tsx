@@ -3,7 +3,7 @@ import { createCliRenderer, LayoutEvents, type BoxRenderable } from "@opentui/co
 import { createRoot } from "@opentui/react"
 import { paintXterm } from "./src/render"
 import { setHostPalette } from "./src/colors"
-import { ptySessions, spawnSession, killSession, pinnedToBottom, activity, waiting, attention, setVisibleSessions, sessionEnv } from "./src/pty"
+import { ptySessions, spawnSession, killSession, pinnedToBottom, activity, waiting, attention, setVisibleSessions, sessionEnv, onSessionWaiting } from "./src/pty"
 import type { Mode, NavEntry, Session } from "./src/types"
 import type { SessionStatus } from "./src/components/StatusBar"
 import { config, applyTheme, setColor, isHexColor, themeNames, setBehavior, setGroupName, type SplitLayout } from "./src/config"
@@ -11,7 +11,7 @@ import { SessionList } from "./src/components/SessionList"
 import { TerminalView } from "./src/components/TerminalView"
 import { StatusBar } from "./src/components/StatusBar"
 import { DeleteConfirmModal } from "./src/components/DeleteConfirmModal"
-import { HelpModal } from "./src/components/HelpModal"
+import { HelpModal, HELP_ROW_COUNT } from "./src/components/HelpModal"
 import { SearchModal } from "./src/components/SearchModal"
 import { RenameModal } from "./src/components/RenameModal"
 import { QuitConfirmModal } from "./src/components/QuitConfirmModal"
@@ -20,7 +20,8 @@ import { OpenSessionModal } from "./src/components/OpenSessionModal"
 import { EnvModal } from "./src/components/EnvModal"
 import { ThemeModal } from "./src/components/ThemeModal"
 import { loadState, saveState, freshSessionId, loadOtherProjects, takeSession } from "./src/persistence"
-import { gitBranch } from "./src/gitInfo"
+import { gitBranch, gitDirty, gitChanges, type GitChanges } from "./src/gitInfo"
+import { DiffPanel } from "./src/components/DiffPanel"
 
 // Fail fast with a readable error instead of a blank TUI when claude is absent
 if (!Bun.which("claude")) {
@@ -154,8 +155,22 @@ function App() {
   const [pickerIdx, setPickerIdx] = useState(0)
   // Per-session git branch (id → branch name), polled from each session's cwd.
   const [branches, setBranches] = useState<Map<number, string>>(new Map())
+  // Per-session "worktree has uncommitted changes". Recomputed only when a
+  // session finishes a turn — reading it costs a subprocess, so it is never
+  // polled the way the branch is.
+  const [dirty, setDirty] = useState<Map<number, boolean>>(new Map())
+  // Diff panel (`v`): the changed-file list for the focused session.
+  const [diffOpen, setDiffOpen] = useState(false)
+  const [diffData, setDiffData] = useState<GitChanges | null>(null)
+  const [diffLoading, setDiffLoading] = useState(false)
   // Terminal width in columns, tracked so the tab bar can window on overflow.
   const [termWidth, setTermWidth] = useState(renderer.terminalWidth)
+  const [termHeight, setTermHeight] = useState(renderer.terminalHeight)
+  // First visible row of the help modal's content.
+  const [helpScroll, setHelpScroll] = useState(0)
+  // Rows of help content that fit: screen minus the modal's own chrome
+  // (top offset, border, padding, the two scroll hints and the footer).
+  const helpRows = Math.max(4, termHeight - 12)
   // Theme modal (`t`): preset selection + a hex input for the accent color.
   const [themeModalOpen, setThemeModalOpen] = useState(false)
   const [themeSel, setThemeSel] = useState(0)
@@ -197,6 +212,7 @@ function App() {
   const splitIdRef = useRef<number | null>(null)
   const focusedSlotRef = useRef<0 | 1>(0)
   const splitLayoutRef = useRef<SplitLayout>(config.behavior.splitLayout)
+  const diffOpenRef = useRef(false)
   // The nav entries the tab bar shows, mirrored for the input-handler closure.
   // highlightedIdx indexes THIS, not the session list — a collapsed group is one
   // entry covering several sessions. Refreshed on every render.
@@ -213,6 +229,7 @@ function App() {
   useEffect(() => { splitIdRef.current = splitId }, [splitId])
   useEffect(() => { focusedSlotRef.current = focusedSlot }, [focusedSlot])
   useEffect(() => { collapsedRef.current = collapsed }, [collapsed])
+  useEffect(() => { diffOpenRef.current = diffOpen }, [diffOpen])
   useEffect(() => { groupRenamingRef.current = groupRenaming }, [groupRenaming])
   useEffect(() => { groupRenameInputRef.current = groupRenameInput }, [groupRenameInput])
   // Both panes of a split are on screen, so neither may raise an attention flag.
@@ -278,10 +295,65 @@ function App() {
     return () => clearInterval(t)
   }, [sessions])
 
+  // ── Working-tree state (git) ───────────────────────────────────────────────
+
+  // Read the dirty flag for one session. Fire-and-forget: the map updates when
+  // the subprocess returns, and a stale entry only means one late repaint.
+  const refreshDirty = useCallback((id: number, cwd: string) => {
+    gitDirty(cwd).then(d => {
+      setDirty(prev => {
+        if (prev.get(id) === d) return prev
+        const next = new Map(prev)
+        next.set(id, d)
+        renderer.requestRender()
+        return next
+      })
+    })
+  }, [])
+
+  // Seed the flag for sessions we haven't measured yet — startup, and each new
+  // or borrowed tab. Existing entries are left to the turn-finished hook.
+  useEffect(() => {
+    for (const s of sessions) if (!dirty.has(s.id)) refreshDirty(s.id, s.cwd)
+  }, [sessions, dirty, refreshDirty])
+
+  const refreshDiff = useCallback((id: number) => {
+    const session = sessionsRef.current.find(s => s.id === id)
+    if (!session) return
+    setDiffLoading(true)
+    gitChanges(session.cwd).then(ch => {
+      // Ignore a result that arrived after the user moved on.
+      if (activeIdRef.current !== id || !diffOpenRef.current) return
+      setDiffData(ch)
+      setDiffLoading(false)
+      renderer.requestRender()
+    })
+  }, [])
+
+  // A finished turn is the one moment the worktree can have changed, so that's
+  // when both the dirty flag and the open diff panel are recomputed.
+  useEffect(() => onSessionWaiting(id => {
+    const session = sessionsRef.current.find(s => s.id === id)
+    if (session) refreshDirty(id, session.cwd)
+    if (diffOpenRef.current && activeIdRef.current === id) refreshDiff(id)
+  }), [refreshDirty, refreshDiff])
+
+  // Opening the panel, or switching the focused session while it's open, reads
+  // fresh state for whatever is now on screen.
+  useEffect(() => {
+    if (!diffOpen) return
+    setDiffData(null)
+    refreshDiff(activeId)
+  }, [diffOpen, activeId, refreshDiff])
+
   // ── Track terminal width so the tab bar can window when tabs overflow ───────
 
   useEffect(() => {
-    const onResize = () => { setTermWidth(renderer.terminalWidth); renderer.requestRender() }
+    const onResize = () => {
+      setTermWidth(renderer.terminalWidth)
+      setTermHeight(renderer.terminalHeight)
+      renderer.requestRender()
+    }
     renderer.on("resize", onResize)
     return () => { renderer.off("resize", onResize) }
   }, [])
@@ -827,6 +899,7 @@ function App() {
         if (seq === "Z") { toggleAllGroups(); return true }
         if (seq === "u") { ungroupHighlighted(); return true }
         if (seq === "U") { ungroupAll(); return true }
+        if (seq === "v") { setDiffOpen(o => !o); return true }
         if (seq === "R") { openGroupRename(); return true }
         if (seq === "s") { toggleSplit(); return true }
         if (seq === "S") { cycleSplitLayout(); return true }
@@ -837,7 +910,7 @@ function App() {
         if (seq === "o") { openPicker(); return true }
         if (seq === "d") { setDeleteConfirm(hl?.id ?? null); return true }
         if (seq === "m") { const next = !renderer.useMouse; renderer.useMouse = next; setMouseEnabled(next); return true }
-        if (seq === "?") { setShowHelp(v => !v); return true }
+        if (seq === "?") { setShowHelp(v => { if (!v) setHelpScroll(0); return !v }); return true }
         if ("123456789".includes(seq)) { const idx = parseInt(seq) - 1; if (idx < len) { setHighlightedIdx(idx); openSession(idx); } return true }
         if (seq === "\x1b") { ptySessions.get(activeIdRef.current)?.pty.write(seq); return true }
         if (seq.startsWith("\x1b[")) { ptySessions.get(activeIdRef.current)?.pty.write(seq); return true }
@@ -879,6 +952,26 @@ function App() {
     renderer.prependInputHandler(handler)
     return () => renderer.removeInputHandler(handler)
   }, [pickerOpen])
+
+  // The help content is longer than most terminals, so it scrolls. Registered
+  // while open and prepended, so it wins over the PgUp/PgDn terminal scroll.
+  useEffect(() => {
+    if (!showHelp) return
+    const max = Math.max(0, HELP_ROW_COUNT - helpRows)
+    const move = (d: number) => setHelpScroll(v => Math.max(0, Math.min(max, v + d)))
+    const handler = (seq: string) => {
+      if (seq === "j" || seq === "\x1b[B") { move(1); return true }
+      if (seq === "k" || seq === "\x1b[A") { move(-1); return true }
+      if (seq === "\x1b[6~" || seq === "\x1b[1;5B" || seq === " ") { move(helpRows); return true }
+      if (seq === "\x1b[5~" || seq === "\x1b[1;5A") { move(-helpRows); return true }
+      if (seq === "g") { setHelpScroll(0); return true }
+      if (seq === "G") { setHelpScroll(max); return true }
+      if (seq === "?" || seq === "\x1b" || seq === "q") { setShowHelp(false); return true }
+      return true // swallow everything else while the modal is up
+    }
+    renderer.prependInputHandler(handler)
+    return () => renderer.removeInputHandler(handler)
+  }, [showHelp, helpRows])
 
   useEffect(() => {
     if (deleteConfirm === null) return
@@ -978,6 +1071,8 @@ function App() {
   const activeStatus: SessionStatus = activity.get(activeId) ? "working" : waiting.get(activeId) ? "waiting" : "idle"
   const splitSession = splitId === null ? undefined : sessions.find(s => s.id === splitId)
   const nameOf = (id: number | null) => (id === null ? "" : sessions.find(s => s.id === id)?.name ?? "")
+  // Keep the panel from eating a narrow terminal: at most 40% of the width.
+  const diffWidth = Math.max(24, Math.min(46, Math.floor(termWidth * 0.4)))
   // One filtered list drives both the tab bar and NORMAL-mode navigation.
   const sessionGroupColors = groupColors(sessions)
   const navEntries = buildNav(filterSessions(sessions, searchQuery), collapsed)
@@ -1006,6 +1101,7 @@ function App() {
             onSelect={(i) => { setHighlightedIdx(i); openSession(i) }}
             onToggleGroup={toggleGroupByColor}
             onToggleAll={toggleAllGroups}
+            dirty={config.behavior.showDirty ? dirty : undefined}
             groupCount={sessionGroupColors.length}
             allCollapsed={sessionGroupColors.length > 0 && sessionGroupColors.every(c => collapsed.has(c))}
             onDelete={id => setDeleteConfirm(id)}
@@ -1023,7 +1119,8 @@ function App() {
         </box>
       </box>
 
-      <box style={{ flexGrow: 1, flexDirection: splitId !== null && splitLayout === "side-by-side" ? "row" : "column" }}>
+      <box style={{ flexGrow: 1, flexDirection: "row" }}>
+      <box style={{ flexGrow: 1, minWidth: 0, flexDirection: splitId !== null && splitLayout === "side-by-side" ? "row" : "column" }}>
         <TerminalView
           title={nameOf(slot0Id)}
           mouseEnabled={mouseEnabled}
@@ -1043,6 +1140,17 @@ function App() {
           />
         )}
       </box>
+      {diffOpen && (
+        <DiffPanel
+          sessionName={activeName}
+          branch={branches.get(activeId)}
+          changes={diffData}
+          loading={diffLoading}
+          rows={Math.max(6, renderer.terminalHeight - 5)}
+          width={diffWidth}
+        />
+      )}
+      </box>
 
       <StatusBar
         mode={mode}
@@ -1053,6 +1161,7 @@ function App() {
         splitName={splitSession?.name}
         groupName={groupName(activeSession?.color) || undefined}
         groupColor={activeSession?.color}
+        dirty={config.behavior.showDirty && !!dirty.get(activeId)}
       />
 
       {deleteConfirm !== null && (
@@ -1077,7 +1186,7 @@ function App() {
         />
       )}
 
-      {showHelp && <HelpModal />}
+      {showHelp && <HelpModal scroll={helpScroll} maxRows={helpRows} />}
 
       {searching && <SearchModal query={searchQuery} onQueryChange={setSearchQuery} />}
 

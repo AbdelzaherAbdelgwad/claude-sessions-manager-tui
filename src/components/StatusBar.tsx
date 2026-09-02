@@ -14,9 +14,11 @@ interface Props {
   // Color group the active session belongs to (its label and color), when tagged.
   groupName?: string
   groupColor?: string
+  // Active session's worktree has uncommitted changes.
+  dirty?: boolean
 }
 
-export function StatusBar({ mode, activeName, activeCwd, activeBranch, activeStatus, splitName, groupName, groupColor }: Props) {
+export function StatusBar({ mode, activeName, activeCwd, activeBranch, activeStatus, splitName, groupName, groupColor, dirty }: Props) {
   const isInsert = mode === "insert"
   const c = config.colors
   const bg = isInsert ? "#FFA500" : "#1a1a2e"
@@ -35,6 +37,7 @@ export function StatusBar({ mode, activeName, activeCwd, activeBranch, activeSta
       {splitName && <text style={{ fg: isInsert ? "#664400" : c.name }}>  ◧ {splitName}</text>}
       {config.behavior.showCwd && activeCwd && <text style={{ fg: isInsert ? "#664400" : c.cwd }}>  {shortCwd(activeCwd)}</text>}
       {config.behavior.showBranch && activeBranch && <text style={{ fg: isInsert ? "#335500" : c.branch }}> ⎇ {activeBranch}</text>}
+      {dirty && <text style={{ fg: isInsert ? "#664400" : c.dirty }}> ✱</text>}
       {status && <text style={{ fg: isInsert ? "#333300" : status.color }}>  · {status.text}</text>}
       {groupName && (
         <text style={{ fg: isInsert ? "#664400" : (groupColor ?? c.name) }}>{"  ▍" + groupName}</text>

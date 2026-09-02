@@ -17,6 +17,8 @@ export interface Colors {
   border: string      // inactive tab border
   branch: string      // git branch in the status bar
   cwd: string         // directory basename in the status bar
+  dirty: string       // uncommitted-changes marker, and the diff panel's adds
+  deleted: string     // the diff panel's deletion counts
 }
 
 export interface Timing {
@@ -32,6 +34,7 @@ export interface Behavior {
   showCwd: boolean
   showBranch: boolean
   splitLayout: SplitLayout
+  showDirty: boolean   // ✱ on tabs whose worktree has uncommitted changes
 }
 
 export interface Config {
@@ -59,6 +62,8 @@ export const THEMES: Record<string, Colors> = {
     border: "#333333",
     branch: "#6a9955",
     cwd: "#666666",
+    dirty: "#E5C07B",
+    deleted: "#E06C75",
   },
   light: {
     active: "#D2691E",
@@ -71,6 +76,8 @@ export const THEMES: Record<string, Colors> = {
     border: "#CCCCCC",
     branch: "#4E7A27",
     cwd: "#888888",
+    dirty: "#B8860B",
+    deleted: "#C0392B",
   },
   solarized: {
     active: "#cb4b16", // orange
@@ -83,6 +90,8 @@ export const THEMES: Record<string, Colors> = {
     border: "#073642",
     branch: "#859900",
     cwd: "#657b83",
+    dirty: "#b58900",
+    deleted: "#dc322f",
   },
 }
 
@@ -98,6 +107,7 @@ export const DEFAULTS: Config = {
     showCwd: true,
     showBranch: true,
     splitLayout: "side-by-side",
+    showDirty: true,
   },
   groups: {},
 }

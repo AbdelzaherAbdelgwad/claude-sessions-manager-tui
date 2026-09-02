@@ -11,6 +11,8 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - **Attention signals** — a tab lights up gold when its session finishes a turn or rings the bell while you're viewing another tab; switching to it clears the flag
 - **Tab-bar overflow** — when tabs exceed the terminal width, they window around the highlighted one with `‹N` / `N›` chevrons showing how many are hidden (click a chevron to reveal them)
 - **Status-bar context** — the bottom bar shows the active session's directory, git branch, and live state (`working…` / `waiting for input`)
+- **Uncommitted-changes marker** — a `✱` on any tab whose worktree is dirty, so you can see which agent actually wrote files
+- **Changes panel** — `v` opens a side panel listing the changed files in the active session's directory, with per-file `+`/`-` counts
 - **Split pane** — press `s` to watch two sessions at once (side by side or stacked, `S` flips); `Tab` moves keyboard focus between them
 - **Configurable** — theme presets, colors, timing thresholds, and display toggles via `~/.claude-sessions-manager/config.json`
 - **Tab groups** — tag tabs with a color (`c` cycles) and they nest inside one group tab in the bar; `R` names it, `z` folds it down to a single tab that carries its members' status
@@ -124,6 +126,7 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 | `u` | Ungroup — dissolve the highlighted tab's group, spreading its tabs back out |
 | `U` | Ungroup every group |
 | `R` | Rename the highlighted tab's group (empty input clears the name) |
+| `v` | Toggle the changes panel for the active session |
 | `t` | Open the theme menu (pick a preset or set the accent color) |
 | `/` | Search / filter sessions |
 
@@ -165,7 +168,7 @@ you're watching it.
 
 | Key | Action |
 |-----|--------|
-| `?` | Toggle keybindings help (Esc to close) |
+| `?` | Toggle keybindings help (`j`/`k` or `↑`/`↓` to scroll, PgUp/PgDn to page, Esc to close) |
 | `Esc` | Forward Escape to Claude Code (dismiss dialogs) |
 
 ## Modes
@@ -260,6 +263,22 @@ Other interactions:
 - Click `▾ all` / `▸ all` to fold or unfold every group
 - When tabs overflow, click a `‹N` / `N›` chevron to jump to hidden tabs
 
+## Git
+
+Each session tracks the git state of its own directory.
+
+- The status bar shows the branch (`⎇ main`) and a `✱` when the worktree has uncommitted changes.
+- Tabs carry the same `✱`, so you can tell at a glance which background session actually wrote files.
+- `v` opens a **changes panel** beside the terminal, listing the changed paths in the active session's directory with their status codes and per-file `+`/`-` counts, plus a total. Untracked files are listed too.
+
+The branch is read straight from `.git/HEAD`, so it's cheap enough to poll
+(`timing.gitPollMs`). Dirty state and the file list are not — they need to run
+`git`, so they're recomputed only when a session **finishes a turn** (and once
+when a tab first appears), which is the only moment an agent can have changed
+the tree. Opening the panel or switching sessions while it's open also refreshes.
+
+Set `behavior.showDirty` to `false` to drop the `✱` markers.
+
 ## Mouse Support
 
 Mouse is enabled by default for clicking sessions and buttons. Press `m` to disable mouse (enters native terminal selection mode for copying text), press `m` again to re-enable.
@@ -284,9 +303,9 @@ On first run, `csm` writes a config file with defaults to `~/.claude-sessions-ma
 | Section | Keys | Purpose |
 |---------|------|---------|
 | `theme` | `dark`, `light`, `solarized` | A named color preset used as the base palette |
-| `colors` | `active`, `highlight`, `attention`, `waiting`, `busy`, `idleDot`, `name`, `border`, `branch`, `cwd` | Hex colors for tab and status-bar elements |
+| `colors` | `active`, `highlight`, `attention`, `waiting`, `busy`, `idleDot`, `name`, `border`, `branch`, `cwd`, `dirty`, `deleted` | Hex colors for tab, status-bar and changes-panel elements |
 | `timing` | `idleMs`, `waitingMs`, `gitPollMs` | Silence before the spinner stops; sustained silence before a turn counts as "waiting for input"; how often git branches are re-read |
-| `behavior` | `showCwd`, `showBranch`, `splitLayout` | Toggle the directory / git branch in the status bar; `splitLayout` is `"side-by-side"` or `"stacked"` (also set by `S`) |
+| `behavior` | `showCwd`, `showBranch`, `splitLayout`, `showDirty` | Toggle the directory / git branch in the status bar and the `✱` dirty markers; `splitLayout` is `"side-by-side"` or `"stacked"` (also set by `S`) |
 | `groups` | `"1"` – `"7"` | Display names for the color groups, keyed by tag index in the order `c` cycles them; titles the group tab and shows in the status bar |
 
 `theme` picks the base palette; any keys you set under `colors` **override the theme per-key**, so a custom color always wins over the preset.

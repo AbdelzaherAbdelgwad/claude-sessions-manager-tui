@@ -42,12 +42,23 @@ export function setVisibleSessions(ids: number[]) {
 const IDLE_MS = config.timing.idleMs
 const WAITING_MS = config.timing.waitingMs
 
+// Fired when a session finishes a turn. The UI uses this to recompute anything
+// that can only have changed while claude was working — the git worktree state,
+// which is too expensive to poll.
+type WaitingListener = (id: number) => void
+const waitingListeners = new Set<WaitingListener>()
+export function onSessionWaiting(fn: WaitingListener): () => void {
+  waitingListeners.add(fn)
+  return () => waitingListeners.delete(fn)
+}
+
 // Enter the "waiting for input" state: turn finished, flag attention if the
 // tab isn't in view. Called from the sustained-idle timer and on the bell.
 function markWaiting(id: number, onUpdate: () => void) {
   if (waiting.get(id)) return
   waiting.set(id, true)
   if (!visibleIds.has(id)) attention.set(id, true)
+  for (const fn of waitingListeners) fn(id)
   onUpdate()
 }
 
