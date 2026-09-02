@@ -14,6 +14,8 @@ const HELP_LINES = [
   ["c", "cycle color tag — same-tag tabs nest under one group tab"],
   ["z", "fold / unfold the highlighted tab's group (or click its ▾)"],
   ["Z", "fold / unfold every group (or click the ▾ all button)"],
+  ["u", "ungroup — dissolve the highlighted tab's group, tabs spread out"],
+  ["U", "ungroup every group (tabs and conversations are untouched)"],
   ["R", "rename the highlighted tab's group (empty clears the name)"],
   ["s", "split pane with the highlighted session (again to close)"],
   ["S", "flip split layout (side-by-side ↔ stacked)"],

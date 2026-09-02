@@ -121,6 +121,8 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 | `c` | Cycle the highlighted session's color tag (moves the tab into that group) |
 | `z` | Fold / unfold the highlighted tab's group |
 | `Z` | Fold / unfold every group at once |
+| `u` | Ungroup — dissolve the highlighted tab's group, spreading its tabs back out |
+| `U` | Ungroup every group |
 | `R` | Rename the highlighted tab's group (empty input clears the name) |
 | `t` | Open the theme menu (pick a preset or set the accent color) |
 | `/` | Search / filter sessions |
@@ -225,6 +227,16 @@ A folded group is one stop for `h` / `l` and for `1`–`9`, and its dot shows th
 loudest status among the tabs it hides — so a session inside it can still turn
 gold for attention or spin while generating. `Enter` (or a click) unfolds it and
 lands on its first member; `z` folds it again.
+
+`u` **dissolves** the group the highlight is in — its tag is cleared and its
+tabs spread back out as ordinary standalone tabs at the end of the bar, keeping
+their relative order. `U` does the same to every group. This is separate from
+folding: folding hides tabs behind one group tab, ungrouping removes the group
+entirely. Neither touches the sessions or their conversations, and `c` re-tags
+any tab. There's no confirmation prompt, so `U` clears every tag immediately.
+
+Group *names* live in the config keyed by tag index, so they survive an ungroup
+— re-tagging a tab with `c` brings its old group name back.
 
 `H` / `L` reorder within a group — they won't push a tab across a group or
 favorite boundary, since the sort would just snap it back.

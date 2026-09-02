@@ -650,6 +650,40 @@ function App() {
     setGroupRenameInput(idx > 0 ? config.groups[String(idx)] ?? "" : "")
   }
 
+  // ── Ungroup ────────────────────────────────────────────────────────────────
+
+  // Dissolve a group: clear the tag from every member so they spread back out
+  // as ordinary standalone tabs. Only the grouping is undone — the sessions and
+  // their conversations are untouched, and `c` re-tags any of them.
+  const ungroup = (color: string) => {
+    const anchor = entrySession(navEntriesRef.current[highlightedIdxRef.current])
+    setGroupCollapsed(color, false)
+    setSessions(prev => {
+      const next = sortSessions(prev.map(s => (s.color === color ? { ...s, color: undefined } : s)))
+      if (anchor) setHighlightedIdx(entryIdxOf(next, anchor.id))
+      return next
+    })
+  }
+
+  const ungroupHighlighted = () => {
+    const e = navEntriesRef.current[highlightedIdxRef.current]
+    const color = e === undefined ? undefined : e.kind === "group" ? e.color : e.group
+    if (color) ungroup(color)
+  }
+
+  // Dissolve every group at once.
+  const ungroupAll = () => {
+    if (groupColors(sessionsRef.current).length === 0) return
+    const anchor = entrySession(navEntriesRef.current[highlightedIdxRef.current])
+    collapsedRef.current = new Set()
+    setCollapsed(new Set())
+    setSessions(prev => {
+      const next = sortSessions(prev.map(s => (s.color ? { ...s, color: undefined } : s)))
+      if (anchor) setHighlightedIdx(entryIdxOf(next, anchor.id))
+      return next
+    })
+  }
+
   // ── Keyboard handler ───────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -791,6 +825,8 @@ function App() {
         if (seq === "c") { if (hl) cycleColor(hl.id); return true }
         if (seq === "z") { toggleGroupFold(); return true }
         if (seq === "Z") { toggleAllGroups(); return true }
+        if (seq === "u") { ungroupHighlighted(); return true }
+        if (seq === "U") { ungroupAll(); return true }
         if (seq === "R") { openGroupRename(); return true }
         if (seq === "s") { toggleSplit(); return true }
         if (seq === "S") { cycleSplitLayout(); return true }
