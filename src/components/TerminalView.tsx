@@ -24,7 +24,7 @@ export function TerminalView({ title, mouseEnabled, termBoxRef, onMouseDown, onS
   return (
     <box
       title={split && !focused ? `${title} (Tab to focus)` : title}
-      bottomTitle={focused ? (mouseEnabled ? " m → select mode to copy " : " m → exit select mode ") : undefined}
+      bottomTitle={focused ? (mouseEnabled ? " shift+drag to copy " : " select mode — m to exit ") : undefined}
       bottomTitleAlignment="right"
       onMouseDown={onMouseDown}
       onMouseScroll={onScroll}

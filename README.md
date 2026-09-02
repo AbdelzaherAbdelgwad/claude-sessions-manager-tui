@@ -170,7 +170,8 @@ you're watching it.
 
 | Key | Action |
 |-----|--------|
-| `m` | Toggle mouse off → use terminal's native text selection to copy |
+| `Shift`+drag | Select text to copy, without leaving the app |
+| `m` | Hand the mouse to the terminal (fallback if Shift+drag doesn't work) |
 
 ### Other
 
@@ -413,11 +414,17 @@ scrolls whichever pane the pointer is over — in a split that need not be the
 focused one. The wheel also scrolls the help modal, the session palette and the
 changes panel.
 
-While mouse mode is on, the terminal reports wheel events to csm instead of
-scrolling its own scrollback, so **your terminal's native scrollback and text
-selection are unavailable**. Press `m` to hand the mouse back to the terminal
-(for selecting and copying text, or using its own scrollback), and `m` again to
-re-enable.
+While mouse mode is on, the terminal reports mouse events to csm instead of
+handling them itself, so **your terminal's native text selection and scrollback
+are unavailable** — dragging to select does nothing.
+
+To copy text out of a session:
+
+- **Shift+drag** usually works without changing anything. Most terminals (kitty, foot, alacritty, ghostty, GNOME Terminal, Windows Terminal, xterm) bypass mouse reporting while Shift is held.
+- Otherwise press **`m`** in NORMAL mode. The status bar shows `SELECT` while the mouse belongs to the terminal, and the pane border disappears. `m` again takes it back.
+
+Entering INSERT mode no longer takes the mouse back automatically, so select
+mode survives until you end it.
 
 ## Persistence
 

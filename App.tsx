@@ -591,11 +591,22 @@ function App() {
     activeIdRef.current = id
   }
 
-  // Enter INSERT mode. If mouse was toggled off (m-mode), turn it back on so the
-  // terminal border (which is hidden while mouse is off) reappears.
+  // Enter INSERT mode. Mouse state is deliberately left alone: turning it back
+  // on here used to cancel select mode the moment you started typing, which
+  // made copying text out of a session almost impossible to complete.
   const enterInsert = () => {
     setMode("insert")
-    if (!renderer.useMouse) { renderer.useMouse = true; setMouseEnabled(true) }
+  }
+
+  // Hand the mouse to the terminal (for its own selection and scrollback) or
+  // take it back. NORMAL mode only: Alt+M reached it from INSERT too, but a
+  // plain key is delivered by every terminal where Alt encoding is not, and
+  // Shift+drag covers selecting without any toggle at all.
+  const toggleMouse = () => {
+    const next = !renderer.useMouse
+    renderer.useMouse = next
+    setMouseEnabled(next)
+    renderer.requestRender()
   }
 
   // `n` opens the default (a Claude session); `T` opens a plain shell in the
@@ -1239,7 +1250,7 @@ function App() {
         if (seq === "T") { addSession("shell"); return true }
         if (seq === "o") { openPalette(); return true }
         if (seq === "d") { setDeleteConfirm(hl?.id ?? null); return true }
-        if (seq === "m") { const next = !renderer.useMouse; renderer.useMouse = next; setMouseEnabled(next); return true }
+        if (seq === "m") { toggleMouse(); return true }
         if (seq === "?") { setShowHelp(v => { if (!v) { setHelpScroll(0); setHelpQuery(""); setHelpSearching(false) } return !v }); return true }
         if ("123456789".includes(seq)) { const idx = parseInt(seq) - 1; if (idx < len) { setHighlightedIdx(idx); openSession(idx); } return true }
         if (seq === "\x1b" && diffOpenRef.current && diffSelRef.current >= 0) { setDiffSel(-1); return true }
@@ -1561,6 +1572,7 @@ function App() {
         groupColor={activeSession?.color}
         dirty={config.behavior.showDirty && !!dirty.get(activeId)}
         notice={statusNotice ?? undefined}
+        mouseOff={!mouseEnabled}
       />
 
       {deleteConfirm !== null && (

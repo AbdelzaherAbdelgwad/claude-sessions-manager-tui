@@ -36,7 +36,8 @@ const HELP_LINES = [
   ["Ctrl+↑ / Ctrl+↓", "scroll terminal (page)"],
   ["Ctrl+C", "delete session (confirm)"],
   ["Ctrl+D", "quit"],
-  ["m", "toggle mouse (off = native terminal select)"],
+  ["Shift+drag", "select text to copy — works without leaving the app"],
+  ["m", "hand the mouse to the terminal (fallback if Shift+drag doesn't)"],
   ["?", "toggle this help (/ filters it, j/k scrolls)"],
 ]
 
