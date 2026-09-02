@@ -19,6 +19,7 @@ interface Props {
   editorRunning?: boolean
   // Reason the last open attempt failed, if any.
   editorError?: string
+  onScroll?: (event: any) => void
 }
 
 // Porcelain status codes → a readable one-word label and a color role.
@@ -36,7 +37,7 @@ function fit(path: string, width: number): string {
   return path.length <= width ? path : "…" + path.slice(path.length - width + 1)
 }
 
-export function DiffPanel({ sessionName, branch, changes, loading, rows, width, selected = -1, onOpenFile, editorRunning, editorError }: Props) {
+export function DiffPanel({ sessionName, branch, changes, loading, rows, width, selected = -1, onOpenFile, editorRunning, editorError, onScroll }: Props) {
   const c = config.colors
   // header (2) + summary (1) + footer hint (1)
   const listRows = Math.max(1, rows - 4)
@@ -50,6 +51,7 @@ export function DiffPanel({ sessionName, branch, changes, loading, rows, width, 
 
   return (
     <box
+      onMouseScroll={onScroll}
       title=" changes "
       style={{
         width, flexShrink: 0, height: "100%", flexDirection: "column",

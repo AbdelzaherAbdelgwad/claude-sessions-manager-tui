@@ -474,8 +474,9 @@ function App() {
 
   // ── Scroll + clipboard ─────────────────────────────────────────────────────
 
-  const scroll = (lines: number, seq?: string) => {
-    const id = activeIdRef.current
+  // `id` defaults to the focused pane; the wheel passes the pane it happened
+  // over, which in a split isn't necessarily the focused one.
+  const scroll = (lines: number, seq?: string, id: number = activeIdRef.current) => {
     const s = ptySessions.get(id)
     if (!s) return
     // In alternate screen (fullscreen mode) forward to PTY — Claude Code handles scrolling
@@ -489,6 +490,28 @@ function App() {
     if (atBottom) pinnedToBottom.add(id)
     else pinnedToBottom.delete(id)
     renderer.requestRender()
+  }
+
+  // Wheel over a terminal pane. With `useMouse` on, the terminal reports wheel
+  // events to us instead of scrolling its own scrollback, so without this they
+  // are parsed and dropped — the wheel appears dead. Three lines per notch is
+  // the usual convention; `scroll` forwards to the PTY on the alternate screen,
+  // where Claude owns the history.
+  // Wheel direction as a signed notch count, for the list-shaped surfaces.
+  const wheelSteps = (event: any): number => {
+    const info = event?.scroll
+    if (!info) return 0
+    const notches = Math.max(1, Math.min(Math.abs(info.delta ?? 1), 5))
+    return info.direction === "up" ? -notches : info.direction === "down" ? notches : 0
+  }
+
+  const wheel = (id: number) => (event: any) => {
+    const info = event?.scroll
+    if (!info) return
+    const notches = Math.max(1, Math.min(Math.abs(info.delta ?? 1), 5))
+    const lines = 3 * notches
+    if (info.direction === "up") scroll(-lines, "\x1b[5~", id)
+    else if (info.direction === "down") scroll(lines, "\x1b[6~", id)
   }
 
   // ── Startup chooser ────────────────────────────────────────────────────────
@@ -1241,6 +1264,7 @@ function App() {
           split={splitId !== null}
           focused={focusedSlot === 0 || splitId === null}
           onMouseDown={() => { if (splitId !== null && focusedSlot === 1) focusOtherPane(); enterInsert() }}
+          onScroll={slot0Id !== null ? wheel(slot0Id) : undefined}
         />
         {slot1Id !== null && (
           <TerminalView
@@ -1250,6 +1274,7 @@ function App() {
             split
             focused={focusedSlot === 1}
             onMouseDown={() => { if (focusedSlot === 0) focusOtherPane(); enterInsert() }}
+            onScroll={wheel(slot1Id)}
           />
         )}
       </box>
@@ -1265,6 +1290,11 @@ function App() {
           onOpenFile={(i) => { setDiffSel(i); openChangedFile(i) }}
           editorRunning={editorRunning}
           editorError={editorError ?? undefined}
+          onScroll={e => {
+            const d = wheelSteps(e)
+            const count = diffDataRef.current?.files.length ?? 0
+            if (d && count > 0) setDiffSel(i => Math.max(0, Math.min(count - 1, (i < 0 ? 0 : i) + d)))
+          }}
         />
       )}
       </box>
@@ -1303,7 +1333,20 @@ function App() {
         />
       )}
 
-      {showHelp && <HelpModal scroll={helpScroll} maxRows={helpRows} query={helpQuery} searching={helpSearching} />}
+      {showHelp && (
+        <HelpModal
+          scroll={helpScroll}
+          maxRows={helpRows}
+          query={helpQuery}
+          searching={helpSearching}
+          onScroll={e => {
+            const d = wheelSteps(e) * 3
+            if (!d) return
+            const max = Math.max(0, helpRowCount(helpQuery) - helpRows)
+            setHelpScroll(v => Math.max(0, Math.min(max, v + d)))
+          }}
+        />
+      )}
 
       {renaming !== null && <RenameModal input={renameInput} onInputChange={setRenameInput} />}
 
@@ -1336,6 +1379,10 @@ function App() {
           loadingForeign={loadingForeign}
           onSelect={choosePaletteItem}
           onCancel={() => setPaletteOpen(false)}
+          onScroll={e => {
+            const d = wheelSteps(e)
+            if (d) setPaletteIdx(i => Math.max(0, Math.min(paletteItemsRef.current.length - 1, i + d)))
+          }}
           rows={Math.max(3, Math.min(14, termHeight - 12))}
         />
       )}

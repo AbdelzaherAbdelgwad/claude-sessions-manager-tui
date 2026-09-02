@@ -29,6 +29,7 @@ const HELP_LINES = [
   ["n", "new session"],
   ["d", "delete session"],
   ["PgUp / PgDn", "scroll terminal"],
+  ["wheel", "scroll the pane under the pointer (and any open panel)"],
   ["Ctrl+↑ / Ctrl+↓", "scroll terminal (page)"],
   ["Ctrl+C", "delete session (confirm)"],
   ["Ctrl+D", "quit"],
@@ -118,9 +119,10 @@ interface Props {
   // Filter text, and whether keystrokes are currently going into it.
   query?: string
   searching?: boolean
+  onScroll?: (event: any) => void
 }
 
-export function HelpModal({ scroll = 0, maxRows = 20, query = "", searching = false }: Props) {
+export function HelpModal({ scroll = 0, maxRows = 20, query = "", searching = false, onScroll }: Props) {
   const rows = helpRows(query)
   const visible = Math.max(1, maxRows)
   const top = Math.max(0, Math.min(scroll, Math.max(0, rows.length - visible)))
@@ -128,7 +130,7 @@ export function HelpModal({ scroll = 0, maxRows = 20, query = "", searching = fa
   const above = top
   const below = Math.max(0, rows.length - top - visible)
   return (
-    <box title="Help" style={{ position: "absolute", top: 1, left: "20%", width: "60%", border: true, borderStyle: "rounded", borderColor: "#00BFFF", padding: 2, flexDirection: "column", gap: 0, backgroundColor: "#111111" }}>
+    <box title="Help" onMouseScroll={onScroll} style={{ position: "absolute", top: 1, left: "20%", width: "60%", border: true, borderStyle: "rounded", borderColor: "#00BFFF", padding: 2, flexDirection: "column", gap: 0, backgroundColor: "#111111" }}>
       <box style={{ flexDirection: "row", width: "100%" }}>
         <text style={{ fg: searching ? "#00BFFF" : "#555555" }}>/</text>
         <text style={{ fg: query ? "#FFFFFF" : "#555555" }}>

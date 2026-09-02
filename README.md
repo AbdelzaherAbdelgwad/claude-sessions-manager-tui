@@ -158,6 +158,7 @@ you're watching it.
 | Key | Action |
 |-----|--------|
 | `PageUp` / `PageDown` or `Ctrl+↑` / `Ctrl+↓` | Scroll terminal |
+| Mouse wheel | Scroll the pane under the pointer (also scrolls the help modal, palette and changes panel) |
 
 ### Clipboard & Selection
 
@@ -333,7 +334,16 @@ Set `behavior.showDirty` to `false` to drop the `✱` markers.
 
 ## Mouse Support
 
-Mouse is enabled by default for clicking sessions and buttons. Press `m` to disable mouse (enters native terminal selection mode for copying text), press `m` again to re-enable.
+Mouse is enabled by default for clicking sessions and buttons, and the wheel
+scrolls whichever pane the pointer is over — in a split that need not be the
+focused one. The wheel also scrolls the help modal, the session palette and the
+changes panel.
+
+While mouse mode is on, the terminal reports wheel events to csm instead of
+scrolling its own scrollback, so **your terminal's native scrollback and text
+selection are unavailable**. Press `m` to hand the mouse back to the terminal
+(for selecting and copying text, or using its own scrollback), and `m` again to
+re-enable.
 
 ## Persistence
 

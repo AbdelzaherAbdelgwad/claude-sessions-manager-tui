@@ -20,6 +20,7 @@ interface Props {
   loadingForeign: boolean
   onSelect: (index: number) => void
   onCancel: () => void
+  onScroll?: (event: any) => void
   rows: number
 }
 
@@ -34,7 +35,7 @@ const shorten = (cwd: string) => {
   return cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd
 }
 
-export function PaletteModal({ query, items, localCount, highlightedIdx, loadingForeign, onSelect, onCancel, rows }: Props) {
+export function PaletteModal({ query, items, localCount, highlightedIdx, loadingForeign, onSelect, onCancel, onScroll, rows }: Props) {
   const c = config.colors
   const visible = Math.max(3, rows)
 
@@ -62,6 +63,7 @@ export function PaletteModal({ query, items, localCount, highlightedIdx, loading
 
   return (
     <box
+      onMouseScroll={onScroll}
       title=" Go to session "
       style={{
         position: "absolute", top: "12%", left: "15%", width: "70%",
