@@ -157,7 +157,8 @@ you're watching it.
 | Key | Action |
 |-----|--------|
 | any key | Forwarded directly to Claude Code (`/commands`, arrows, Tab) |
-| `Esc` | Back to NORMAL mode |
+| `Esc` | Back to NORMAL mode (Claude tabs; in a shell tab Esc goes to the program) |
+| `Ctrl+\` | Back to NORMAL mode — always, and the only way out of a shell tab |
 
 ### Scrolling (any mode)
 
@@ -198,6 +199,17 @@ than wherever csm was launched.
 
 Shell tabs are marked with `$` in the tab bar and the palette, and are numbered
 separately (`shell 1`, `shell 2`) so they don't interleave with `Session N`.
+
+**`Esc` belongs to the program, not to csm.** In a Claude tab `Esc` leaves
+INSERT mode, but a shell tab is where full-screen editors live and `Esc` is
+load-bearing for every modal one of them — helix, vim, lazygit. So in a shell
+tab it is forwarded to the child, and **`Ctrl+\`** leaves INSERT instead. The
+status bar spells out which key applies: `INSERT (Ctrl+\ to exit)`.
+
+Programs that open `/dev/tty` directly — lazygit, `fzf`'s `Ctrl+T`, `gpg`
+pinentry, `sudo` prompts — work correctly, because csm makes each child a
+session leader owning its pane's PTY. Job control works too, so `Ctrl+Z`,
+`fg` and `jobs` behave normally.
 
 They behave like any other tab: groups, splits, the changes panel, per-session
 env vars, renaming, favorites and the status bar all apply. The activity

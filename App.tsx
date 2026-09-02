@@ -1260,7 +1260,14 @@ function App() {
       }
 
       if (mode === "insert") {
-        if (seq === "\x1b") { setMode("normal"); return true }
+        // Ctrl+\ always leaves INSERT, and is the only way out of a shell tab.
+        if (seq === "\x1c") { setMode("normal"); return true }
+        // Esc leaves INSERT for a Claude session, but a shell tab is where
+        // full-screen TUIs live and Esc is load-bearing for every modal one of
+        // them — helix, vim, lazygit. Swallowing it made them unusable, so in a
+        // shell tab it goes to the child and Ctrl+\ is the way back.
+        const kind = sessionsRef.current.find(s => s.id === activeIdRef.current)?.kind
+        if (seq === "\x1b" && kind !== "shell") { setMode("normal"); return true }
         ptySessions.get(activeIdRef.current)?.pty.write(seq)
         return true
       }
@@ -1567,6 +1574,7 @@ function App() {
         activeCwd={activeSession?.cwd}
         activeBranch={activeId != null ? branches.get(activeId) : undefined}
         activeStatus={activeStatus}
+        insertExit={activeSession?.kind === "shell" ? "Ctrl+\\" : "Esc"}
         splitName={splitSession?.name}
         groupName={groupName(activeSession?.color) || undefined}
         groupColor={activeSession?.color}

@@ -68,6 +68,25 @@ interface SpawnOpts {
   kind?: SessionKind
 }
 
+// Children need the PTY as their CONTROLLING terminal, not merely as stdin.
+// Bun.Terminal gives them the PTY on fd 0-2 but leaves them in csm's session
+// with no ctty of their own, and the consequences are not subtle: /dev/tty
+// still resolves to the terminal csm itself is running in, so anything opening
+// it directly — lazygit, fzf's Ctrl+T, gpg pinentry, sudo's password prompt —
+// draws straight over csm's UI instead of into its pane. bash also refuses job
+// control ("cannot set terminal process group"), since that needs a ctty too.
+//
+// Bun exposes no option for this, so the child is wrapped in setsid(1), which
+// makes it a session leader and adopts its stdin as the controlling terminal.
+// setsid execs rather than forks when the caller isn't already a process group
+// leader, so the wrapper does not disturb exit codes or killing. Where setsid
+// is unavailable (notably macOS) the child is spawned as before.
+let leaderPrefix: string[] | null = null
+function sessionLeader(): string[] {
+  if (leaderPrefix === null) leaderPrefix = Bun.which("setsid") ? ["setsid", "-c"] : []
+  return leaderPrefix
+}
+
 // Command for a shell tab: the configured shell, else $SHELL, else whatever
 // common shell is actually installed.
 export function shellCommand(): string[] {
@@ -137,7 +156,7 @@ export function spawnSession(id: number, cols: number, rows: number, onUpdate: (
         "--settings", '{"tui":"fullscreen"}',
       ]
   const proc = Bun.spawn(
-    argv,
+    [...sessionLeader(), ...argv],
     {
       terminal: pty,
       cwd: opts.cwd,

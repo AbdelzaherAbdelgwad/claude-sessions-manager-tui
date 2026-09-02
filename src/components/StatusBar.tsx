@@ -21,14 +21,17 @@ interface Props {
   // Mouse handed back to the terminal, so csm is not receiving clicks. Worth
   // stating: the tab bar stops responding and the pane border disappears.
   mouseOff?: boolean
+  // Key that leaves INSERT for the active tab: Esc normally, but a shell tab
+  // forwards Esc to the child, so it needs Ctrl+\ instead.
+  insertExit?: string
 }
 
-export function StatusBar({ mode, activeName, activeCwd, activeBranch, activeStatus, splitName, groupName, groupColor, dirty, notice, mouseOff }: Props) {
+export function StatusBar({ mode, activeName, activeCwd, activeBranch, activeStatus, splitName, groupName, groupColor, dirty, notice, mouseOff, insertExit }: Props) {
   const isInsert = mode === "insert"
   const c = config.colors
   const bg = isInsert ? "#FFA500" : "#1a1a2e"
   const fg = isInsert ? "#000000" : "#ffffff"
-  const label = isInsert ? " INSERT " : " NORMAL "
+  const label = isInsert ? (insertExit ? ` INSERT (${insertExit} to exit) ` : " INSERT ") : " NORMAL "
   const hint = `PgUp/PgDn · Ctrl+↑↓ scroll · ? help · Ctrl+D quit`
   // Live state of the session you're viewing.
   const status =
