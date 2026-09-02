@@ -1097,10 +1097,19 @@ function App() {
 
   // Palette candidates, ranked. Matching runs over the name first, then the
   // group, branch and directory, so a session is findable by any of them.
-  const paletteItems: PaletteItem[] = (() => {
+  // Ranked separately so the two sections stay partitioned however they score —
+  // a high-scoring session from another project must not jump above this
+  // project's own tabs and land under the wrong heading.
+  const rankBy = (rows: Array<{ item: PaletteItem; score: number }>): PaletteItem[] =>
+    rows
+      .map((r, i) => [r, i] as const)
+      // Stable within equal scores, so an empty query keeps tab order.
+      .sort((a, b) => b[0].score - a[0].score || a[1] - b[1])
+      .map(([r]) => r.item)
+
+  const paletteLocal: PaletteItem[] = (() => {
     if (!paletteOpen) return []
     const q = paletteQuery.trim()
-    const open = new Set(sessions.map(s => s.claudeSessionId))
     const rows: Array<{ item: PaletteItem; score: number }> = []
     for (const session of sessions) {
       const group = groupName(session.color) || undefined
@@ -1108,20 +1117,25 @@ function App() {
       const score = fuzzyScoreFields([session.name, group, branch], q)
       if (score >= 0) rows.push({ item: { kind: "local", session, group, branch, dirty: dirty.get(session.id) }, score })
     }
+    return rankBy(rows)
+  })()
+
+  const paletteForeign: PaletteItem[] = (() => {
+    if (!paletteOpen) return []
+    const q = paletteQuery.trim()
+    const open = new Set(sessions.map(s => s.claudeSessionId))
+    const rows: Array<{ item: PaletteItem; score: number }> = []
     for (const { cwd, session } of foreign) {
       // A session already pulled into this project is listed once, as a tab.
       if (open.has(session.claudeSessionId)) continue
       const branch = gitBranch(cwd) ?? undefined
       const score = fuzzyScoreFields([session.name, branch, cwd], q)
-      // Sessions living elsewhere sort below this project's own.
-      if (score >= 0) rows.push({ item: { kind: "foreign", session, cwd, branch }, score: score - 20 })
+      if (score >= 0) rows.push({ item: { kind: "foreign", session, cwd, branch }, score })
     }
-    // Stable within equal scores, so an empty query keeps tab order.
-    return rows
-      .map((r, i) => [r, i] as const)
-      .sort((a, b) => b[0].score - a[0].score || a[1] - b[1])
-      .map(([r]) => r.item)
+    return rankBy(rows)
   })()
+
+  const paletteItems: PaletteItem[] = [...paletteLocal, ...paletteForeign]
   paletteItemsRef.current = paletteItems
   const navEntries = buildNav(sessions, collapsed)
   navEntriesRef.current = navEntries
@@ -1248,6 +1262,7 @@ function App() {
         <PaletteModal
           query={paletteQuery}
           items={paletteItems}
+          localCount={paletteLocal.length}
           highlightedIdx={paletteIdx}
           loadingForeign={loadingForeign}
           onSelect={choosePaletteItem}

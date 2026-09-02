@@ -10,7 +10,11 @@ export type PaletteItem =
 
 interface Props {
   query: string
+  // Flat and always partitioned: this project's tabs first, then sessions saved
+  // elsewhere. `localCount` is where the second section starts, so the two are
+  // headed separately while arrow keys still walk one continuous list.
   items: PaletteItem[]
+  localCount: number
   highlightedIdx: number
   // Other projects are read from disk when the palette opens.
   loadingForeign: boolean
@@ -19,18 +23,42 @@ interface Props {
   rows: number
 }
 
+// A section heading occupies a row but is not selectable.
+type DisplayRow =
+  | { kind: "header"; label: string; count: number }
+  | { kind: "item"; item: PaletteItem; idx: number }
+
 
 const shorten = (cwd: string) => {
   const home = homedir()
   return cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd
 }
 
-export function PaletteModal({ query, items, highlightedIdx, loadingForeign, onSelect, onCancel, rows }: Props) {
+export function PaletteModal({ query, items, localCount, highlightedIdx, loadingForeign, onSelect, onCancel, rows }: Props) {
   const c = config.colors
   const visible = Math.max(3, rows)
-  // Keep the cursor on screen without re-centring on every keystroke.
-  const start = Math.max(0, Math.min(highlightedIdx - Math.floor(visible / 2), Math.max(0, items.length - visible)))
-  const slice = items.slice(start, start + visible)
+
+  // Interleave the two section headings into the row list.
+  const display: DisplayRow[] = []
+  const localItems = items.slice(0, localCount)
+  const foreignItems = items.slice(localCount)
+  if (localItems.length > 0) {
+    display.push({ kind: "header", label: "this project", count: localItems.length })
+    localItems.forEach((item, i) => display.push({ kind: "item", item, idx: i }))
+  }
+  if (foreignItems.length > 0) {
+    display.push({ kind: "header", label: "other projects", count: foreignItems.length })
+    foreignItems.forEach((item, i) => display.push({ kind: "item", item, idx: localCount + i }))
+  }
+
+  // Window around the cursor's *display* position, so a heading never gets
+  // separated from the rows underneath it by more than the scroll itself.
+  const cursorRow = display.findIndex(r => r.kind === "item" && r.idx === highlightedIdx)
+  const start = Math.max(0, Math.min(
+    Math.max(0, cursorRow - Math.floor(visible / 2)),
+    Math.max(0, display.length - visible),
+  ))
+  const slice = display.slice(start, start + visible)
 
   return (
     <box
@@ -55,8 +83,16 @@ export function PaletteModal({ query, items, highlightedIdx, loadingForeign, onS
         <text style={{ fg: "#888888" }}>{loadingForeign ? "searching…" : "no match"}</text>
       )}
 
-      {slice.map((item, i) => {
-        const idx = start + i
+      {slice.map((row, i) => {
+        if (row.kind === "header") {
+          return (
+            <box key={`h-${row.label}`} style={{ flexDirection: "row", width: "100%", paddingX: 1 }}>
+              <text style={{ fg: c.active }}>{row.label}</text>
+              <text style={{ fg: "#444444" }}>{`  ${row.count}`}</text>
+            </box>
+          )
+        }
+        const { item, idx } = row
         const on = idx === highlightedIdx
         const s = item.session
         return (
@@ -78,8 +114,8 @@ export function PaletteModal({ query, items, highlightedIdx, loadingForeign, onS
         )
       })}
 
-      {items.length > slice.length && (
-        <text style={{ fg: "#555555" }}>{`… ${items.length - slice.length} more`}</text>
+      {display.length > slice.length && (
+        <text style={{ fg: "#555555" }}>{`… ${display.length - slice.length} more`}</text>
       )}
 
       <box onMouseDown={onCancel}>

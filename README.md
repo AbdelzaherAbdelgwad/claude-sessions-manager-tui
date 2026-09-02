@@ -194,9 +194,11 @@ every session saved under another directory:
 ╭─ Go to session ────────────────────────────────────╮
 │ › api                                            4 │
 │ ───                                                │
+│ this project  3                                    │
 │ ▶ ▍api          backend   ⎇ main  ✱                │
 │   ▍api-tests    backend   ⎇ main                   │
 │   rapid-proto              ⎇ spike                 │
+│ other projects  1                                  │
 │   api-gw                   ⎇ main      ~/other-repo│
 ╰────────────────────────────────────────────────────╯
 ```
@@ -204,7 +206,8 @@ every session saved under another directory:
 - Type to filter. Matching runs over the session name first, then its group, branch and directory, so any of them will find it.
 - `↑`/`↓` or `Ctrl+p`/`Ctrl+n` move; Enter opens; Esc cancels; `Ctrl+u` clears the query.
 - Rows carry the same state as the tab bar — status dot, group tag, branch, `✱` dirty marker — so the palette doubles as an overview when tabs are folded or scrolled out of the bar.
-- This project's tabs rank above sessions from elsewhere. Picking one of those moves it here as a new tab, exactly as the old `o` picker did.
+- The two sections are headed and ranked separately, so a strong match from another project can never surface above your open tabs. Arrow keys still walk one continuous list across both.
+- Picking a session from **other projects** moves it here as a new tab, exactly as the old `o` picker did. A session already open here is only listed once, under this project.
 - Selecting a tab inside a folded group unfolds it first.
 
 ## Session List
