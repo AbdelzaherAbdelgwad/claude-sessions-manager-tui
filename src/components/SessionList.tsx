@@ -16,10 +16,6 @@ interface Props {
   // the all-groups button's presence and its glyph.
   groupCount?: number
   allCollapsed?: boolean
-  renaming?: number | null
-  renameInput?: string
-  searchQuery?: string
-  searching?: boolean
   activeSessions?: Map<number, boolean>
   attention?: Map<number, boolean>
   waiting?: Map<number, boolean>

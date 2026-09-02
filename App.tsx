@@ -12,15 +12,15 @@ import { TerminalView } from "./src/components/TerminalView"
 import { StatusBar } from "./src/components/StatusBar"
 import { DeleteConfirmModal } from "./src/components/DeleteConfirmModal"
 import { HelpModal, helpRowCount } from "./src/components/HelpModal"
-import { SearchModal } from "./src/components/SearchModal"
 import { RenameModal } from "./src/components/RenameModal"
 import { QuitConfirmModal } from "./src/components/QuitConfirmModal"
 import { StartupModal } from "./src/components/StartupModal"
-import { OpenSessionModal } from "./src/components/OpenSessionModal"
+import { PaletteModal, type PaletteItem } from "./src/components/PaletteModal"
 import { EnvModal } from "./src/components/EnvModal"
 import { ThemeModal } from "./src/components/ThemeModal"
 import { loadState, saveState, freshSessionId, loadOtherProjects, takeSession } from "./src/persistence"
 import { gitBranch, gitDirty, gitChanges, type GitChanges } from "./src/gitInfo"
+import { fuzzyScoreFields } from "./src/fuzzy"
 import { DiffPanel } from "./src/components/DiffPanel"
 
 // Fail fast with a readable error instead of a blank TUI when claude is absent
@@ -66,13 +66,6 @@ function groupName(color: string | undefined): string {
 const groupRank = (s: Session): number => {
   const i = TAG_COLORS.indexOf(s.color)
   return i > 0 ? i : TAG_COLORS.length
-}
-
-// The tabs the nav bar shows — and, crucially, the list every NORMAL-mode
-// navigation key indexes into, so h/l/1-9/d never land on a hidden tab.
-function filterSessions(list: Session[], query: string): Session[] {
-  const q = query.toLowerCase()
-  return q ? list.filter(s => s.name.toLowerCase().includes(q)) : list
 }
 
 // Turn the sorted tab list into addressable nav entries. A color run is either
@@ -143,16 +136,17 @@ function App() {
   // Highlighted row in the env var list; -1 = none (typing to add). Arrow keys
   // move it, Enter on a selected row (with empty input) removes that var.
   const [envSel, setEnvSel] = useState(-1)
-  const [searchQuery, setSearchQuery] = useState("")
-  const [searching, setSearching] = useState(false)
   const [spinnerFrame, setSpinnerFrame] = useState(0)
   const [quitConfirm, setQuitConfirm] = useState(false)
   // Show the resume/start-new chooser only when valid saved state exists
   const [showStartup, setShowStartup] = useState(initialState.restored)
-  // Cross-project picker ("o"): saved sessions from other directories
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [pickerItems, setPickerItems] = useState<Array<{ cwd: string; session: Session }>>([])
-  const [pickerIdx, setPickerIdx] = useState(0)
+  // Session palette ("/" or "o"): fuzzy jump across this project's tabs and
+  // every session saved under another directory.
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [paletteQuery, setPaletteQuery] = useState("")
+  const [paletteIdx, setPaletteIdx] = useState(0)
+  const [foreign, setForeign] = useState<Array<{ cwd: string; session: Session }>>([])
+  const [loadingForeign, setLoadingForeign] = useState(false)
   // Per-session git branch (id → branch name), polled from each session's cwd.
   const [branches, setBranches] = useState<Map<number, string>>(new Map())
   // Per-session "worktree has uncommitted changes". Recomputed only when a
@@ -206,11 +200,11 @@ function App() {
   const envModalRef = useRef<number | null>(null)
   const envInputRef = useRef("")
   const envSelRef = useRef(-1)
-  const searchQueryRef = useRef("")
-  const searchingRef = useRef(false)
   const showStartupRef = useRef(initialState.restored)
-  const pickerItemsRef = useRef<Array<{ cwd: string; session: Session }>>([])
-  const pickerIdxRef = useRef(0)
+  const paletteOpenRef = useRef(false)
+  const paletteQueryRef = useRef("")
+  const paletteIdxRef = useRef(0)
+  const paletteItemsRef = useRef<PaletteItem[]>([])
   const splitIdRef = useRef<number | null>(null)
   const focusedSlotRef = useRef<0 | 1>(0)
   const splitLayoutRef = useRef<SplitLayout>(config.behavior.splitLayout)
@@ -225,8 +219,9 @@ function App() {
   const themeEditingRef = useRef(false)
   useEffect(() => { themeEditingRef.current = themeEditing }, [themeEditing])
   useEffect(() => { showStartupRef.current = showStartup }, [showStartup])
-  useEffect(() => { pickerItemsRef.current = pickerItems }, [pickerItems])
-  useEffect(() => { pickerIdxRef.current = pickerIdx }, [pickerIdx])
+  useEffect(() => { paletteOpenRef.current = paletteOpen }, [paletteOpen])
+  useEffect(() => { paletteQueryRef.current = paletteQuery }, [paletteQuery])
+  useEffect(() => { paletteIdxRef.current = paletteIdx }, [paletteIdx])
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
   useEffect(() => { splitIdRef.current = splitId }, [splitId])
   useEffect(() => { focusedSlotRef.current = focusedSlot }, [focusedSlot])
@@ -255,8 +250,6 @@ function App() {
   useEffect(() => { envModalRef.current = envModal }, [envModal])
   useEffect(() => { envInputRef.current = envInput }, [envInput])
   useEffect(() => { envSelRef.current = envSel }, [envSel])
-  useEffect(() => { searchQueryRef.current = searchQuery }, [searchQuery])
-  useEffect(() => { searchingRef.current = searching }, [searching])
 
   // ── Spinner animation: tick only while some session is streaming ───────────
 
@@ -504,31 +497,45 @@ function App() {
   // Index of the nav entry holding a session — the tab itself when its group is
   // expanded, otherwise the collapsed group standing in for it. 0 if not shown.
   const entryIdxOf = (list: Session[], id: number): number => {
-    const entries = buildNav(filterSessions(list, searchQueryRef.current), collapsedRef.current)
+    const entries = buildNav(list, collapsedRef.current)
     const idx = entries.findIndex(e =>
       e.kind === "session" ? e.session.id === id : e.sessions.some(x => x.id === id))
     return idx < 0 ? 0 : idx
   }
 
-  // ── Cross-project picker ───────────────────────────────────────────────────
+  // ── Session palette ────────────────────────────────────────────────────────
 
-  const openPicker = async () => {
-    const others = await loadOtherProjects()
-    setPickerItems(others.flatMap(p => p.sessions.map(session => ({ cwd: p.cwd, session }))))
-    setPickerIdx(0)
-    setPickerOpen(true)
+  const openPalette = () => {
+    setPaletteQuery("")
+    setPaletteIdx(0)
+    setPaletteOpen(true)
+    // This project's tabs render immediately; other projects come off disk.
+    setLoadingForeign(true)
+    loadOtherProjects().then(others => {
+      setForeign(others.flatMap(p => p.sessions.map(session => ({ cwd: p.cwd, session }))))
+      setLoadingForeign(false)
+      renderer.requestRender()
+    })
   }
 
-  // Move the chosen session from its source project into this one and open it.
-  const pickBorrowed = async (idx: number) => {
-    const item = pickerItemsRef.current[idx]
-    setPickerOpen(false)
+  const choosePaletteItem = async (idx: number) => {
+    const item = paletteItemsRef.current[idx]
+    setPaletteOpen(false)
     if (!item) return
-    // Already open here? Just focus it — never resume one conversation twice.
+    if (item.kind === "local") {
+      // A member of a folded group has no entry of its own — open the group.
+      if (item.session.color && collapsedRef.current.has(item.session.color)) {
+        setGroupCollapsed(item.session.color, false)
+      }
+      focusSession(item.session.id)
+      setHighlightedIdx(entryIdxOf(sessionsRef.current, item.session.id))
+      return
+    }
+    // Already open here? Focus it — never resume one conversation twice.
     const existing = sessionsRef.current.find(s => s.claudeSessionId === item.session.claudeSessionId)
     if (existing) {
-      setActiveId(existing.id)
-      setHighlightedIdx(sessionsRef.current.indexOf(existing))
+      focusSession(existing.id)
+      setHighlightedIdx(entryIdxOf(sessionsRef.current, existing.id))
       return
     }
     const taken = await takeSession(item.cwd, item.session.claudeSessionId)
@@ -606,8 +613,7 @@ function App() {
       if (activeIdRef.current === id && rest.length > 0) {
         // Prefer whatever is still visible under the current filter, and skip
         // the split half so the two panes don't collapse onto one session.
-        const vis = filterSessions(rest, searchQueryRef.current)
-        const pool = vis.length > 0 ? vis : rest
+        const pool = rest
         const next = (pool.find(x => x.id !== splitIdRef.current) ?? pool[0]).id
         if (next === splitIdRef.current) {
           setSplitId(null); splitIdRef.current = null
@@ -616,7 +622,7 @@ function App() {
         setActiveId(next)
         activeIdRef.current = next
       }
-      const visCount = filterSessions(rest, searchQueryRef.current).length
+      const visCount = buildNav(rest, collapsedRef.current).length
       setHighlightedIdx(i => Math.max(0, Math.min(i, visCount - 1)))
       return rest
     })
@@ -856,14 +862,6 @@ function App() {
         return true
       }
 
-      if (searchingRef.current) {
-        if (seq === "\r") { setSearching(false); return true }
-        if (seq === "\x1b") { setSearching(false); return true }
-        if (seq === "\x7f" || seq === "\b") { setSearchQuery(s => s.slice(0, -1)); return true }
-        if (seq.length === 1 && seq.charCodeAt(0) >= 32) { setSearchQuery(s => s + seq); return true }
-        return true
-      }
-
       // Restart a dead claude with Enter (insert mode, or normal mode while the
       // dead tab is both active and highlighted — otherwise Enter still opens tabs)
       if (seq === "\r") {
@@ -907,9 +905,9 @@ function App() {
         if (seq === "S") { cycleSplitLayout(); return true }
         if (seq === "\t" && splitIdRef.current !== null) { focusOtherPane(); return true }
         if (seq === "t") { setThemeSel(Math.max(0, themeNames.indexOf(config.theme))); setThemeEditing(false); setThemeEdit(""); setThemeModalOpen(true); return true }
-        if (seq === "/") { setSearching(true); setSearchQuery(""); return true }
+        if (seq === "/") { openPalette(); return true }
         if (seq === "n") { addSession(); return true }
-        if (seq === "o") { openPicker(); return true }
+        if (seq === "o") { openPalette(); return true }
         if (seq === "d") { setDeleteConfirm(hl?.id ?? null); return true }
         if (seq === "m") { const next = !renderer.useMouse; renderer.useMouse = next; setMouseEnabled(next); return true }
         if (seq === "?") { setShowHelp(v => { if (!v) { setHelpScroll(0); setHelpQuery(""); setHelpSearching(false) } return !v }); return true }
@@ -943,17 +941,24 @@ function App() {
   }, [showStartup])
 
   useEffect(() => {
-    if (!pickerOpen) return
+    if (!paletteOpen) return
+    // Every printable key is query text, so movement uses the arrows and the
+    // readline-style Ctrl+p / Ctrl+n rather than j/k.
+    const move = (d: number) => setPaletteIdx(i =>
+      Math.max(0, Math.min(paletteItemsRef.current.length - 1, i + d)))
     const handler = (seq: string) => {
-      if (seq === "j" || seq === "\x1b[B") { setPickerIdx(i => Math.min(i + 1, Math.max(pickerItemsRef.current.length - 1, 0))); return true }
-      if (seq === "k" || seq === "\x1b[A") { setPickerIdx(i => Math.max(i - 1, 0)); return true }
-      if (seq === "\r") { pickBorrowed(pickerIdxRef.current); return true }
-      if (seq === "\x1b") { setPickerOpen(false); return true }
-      return true
+      if (seq === "\x1b[B" || seq === "\x0e") { move(1); return true }
+      if (seq === "\x1b[A" || seq === "\x10") { move(-1); return true }
+      if (seq === "\r") { choosePaletteItem(paletteIdxRef.current); return true }
+      if (seq === "\x1b") { setPaletteOpen(false); return true }
+      if (seq === "\x7f" || seq === "\b") { setPaletteQuery(q => q.slice(0, -1)); setPaletteIdx(0); return true }
+      if (seq === "\x15") { setPaletteQuery(""); setPaletteIdx(0); return true } // Ctrl+U
+      if (seq.length === 1 && seq.charCodeAt(0) >= 32) { setPaletteQuery(q => q + seq); setPaletteIdx(0); return true }
+      return true // swallow everything else while the palette is up
     }
     renderer.prependInputHandler(handler)
     return () => renderer.removeInputHandler(handler)
-  }, [pickerOpen])
+  }, [paletteOpen])
 
   // The help content is longer than most terminals, so it scrolls. Registered
   // while open and prepended, so it wins over the PgUp/PgDn terminal scroll.
@@ -1089,22 +1094,41 @@ function App() {
   const diffWidth = Math.max(24, Math.min(46, Math.floor(termWidth * 0.4)))
   // One filtered list drives both the tab bar and NORMAL-mode navigation.
   const sessionGroupColors = groupColors(sessions)
-  const navEntries = buildNav(filterSessions(sessions, searchQuery), collapsed)
+
+  // Palette candidates, ranked. Matching runs over the name first, then the
+  // group, branch and directory, so a session is findable by any of them.
+  const paletteItems: PaletteItem[] = (() => {
+    if (!paletteOpen) return []
+    const q = paletteQuery.trim()
+    const open = new Set(sessions.map(s => s.claudeSessionId))
+    const rows: Array<{ item: PaletteItem; score: number }> = []
+    for (const session of sessions) {
+      const group = groupName(session.color) || undefined
+      const branch = branches.get(session.id)
+      const score = fuzzyScoreFields([session.name, group, branch], q)
+      if (score >= 0) rows.push({ item: { kind: "local", session, group, branch, dirty: dirty.get(session.id) }, score })
+    }
+    for (const { cwd, session } of foreign) {
+      // A session already pulled into this project is listed once, as a tab.
+      if (open.has(session.claudeSessionId)) continue
+      const branch = gitBranch(cwd) ?? undefined
+      const score = fuzzyScoreFields([session.name, branch, cwd], q)
+      // Sessions living elsewhere sort below this project's own.
+      if (score >= 0) rows.push({ item: { kind: "foreign", session, cwd, branch }, score: score - 20 })
+    }
+    // Stable within equal scores, so an empty query keeps tab order.
+    return rows
+      .map((r, i) => [r, i] as const)
+      .sort((a, b) => b[0].score - a[0].score || a[1] - b[1])
+      .map(([r]) => r.item)
+  })()
+  paletteItemsRef.current = paletteItems
+  const navEntries = buildNav(sessions, collapsed)
   navEntriesRef.current = navEntries
 
   return (
     <box style={{ flexDirection: "column", width: "100%", height: "100%" }}>
       <box style={{ height: 3, flexShrink: 0, flexDirection: "row", gap: 1, paddingX: 1 }}>
-        {searchQuery && (
-          <>
-            <box style={{ paddingX: 1, border: true, borderStyle: "rounded", borderColor: "#00BFFF", height: "100%", flexDirection: "row" }}>
-              <text style={{ fg: "#00BFFF" }}>/{searchQuery}</text>
-            </box>
-            <box onMouseDown={() => { setSearching(false); setSearchQuery(""); }} style={{ paddingX: 1, border: true, borderStyle: "rounded", borderColor: "#FF6B6B", height: "100%", flexDirection: "row" }}>
-              <text style={{ fg: "#FF6B6B" }}>✕ Cancel</text>
-            </box>
-          </>
-        )}
         <box style={{ flexGrow: 1, height: "100%" }}>
           <SessionList
             entries={navEntries}
@@ -1120,10 +1144,6 @@ function App() {
             allCollapsed={sessionGroupColors.length > 0 && sessionGroupColors.every(c => collapsed.has(c))}
             onDelete={id => setDeleteConfirm(id)}
             onAdd={addSession}
-            renaming={renaming}
-            renameInput={renameInput}
-            searchQuery={searchQuery}
-            searching={searching}
             activeSessions={activity}
             attention={attention}
             waiting={waiting}
@@ -1202,8 +1222,6 @@ function App() {
 
       {showHelp && <HelpModal scroll={helpScroll} maxRows={helpRows} query={helpQuery} searching={helpSearching} />}
 
-      {searching && <SearchModal query={searchQuery} onQueryChange={setSearchQuery} />}
-
       {renaming !== null && <RenameModal input={renameInput} onInputChange={setRenameInput} />}
 
       {groupRenaming !== null && (
@@ -1226,12 +1244,15 @@ function App() {
         />
       )}
 
-      {pickerOpen && (
-        <OpenSessionModal
-          items={pickerItems}
-          highlightedIdx={pickerIdx}
-          onSelect={pickBorrowed}
-          onCancel={() => setPickerOpen(false)}
+      {paletteOpen && (
+        <PaletteModal
+          query={paletteQuery}
+          items={paletteItems}
+          highlightedIdx={paletteIdx}
+          loadingForeign={loadingForeign}
+          onSelect={choosePaletteItem}
+          onCancel={() => setPaletteOpen(false)}
+          rows={Math.max(3, Math.min(14, termHeight - 12))}
         />
       )}
 

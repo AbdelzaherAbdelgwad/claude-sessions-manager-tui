@@ -18,12 +18,12 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - **Tab groups** — tag tabs with a color (`c` cycles) and they nest inside one group tab in the bar; `R` names it, `z` folds it down to a single tab that carries its members' status
 - **Faithful colors** — Claude's output keeps your terminal's own ANSI palette (queried once via OSC 4) and its text styles (bold, dim, italic, underline, strikethrough), so a session looks like plain `claude` does
 - **Favorites** — star sessions (`*`); they sort to the front
-- **Rename** sessions (`r`) and **search/filter** them (`/`) via modals
+- **Rename** sessions (`r`) and jump between them with the **session palette** (`/`) — fuzzy search over every tab and every session saved in another project
 - **Per-session env vars** — press `e` to add (`KEY=VALUE`) a var on the active session, or `↑`/`↓` to pick an existing var and `r` to remove it; `claude` respawns (in-memory only, not persisted)
 - **Per-project session persistence** — tabs (names, favorites, order) are saved per launch directory and restored
 - **Conversation resume** — restored tabs reopen the actual Claude conversation (`claude --resume`)
 - **Startup chooser** — on launch, Resume this directory's sessions or Start new
-- **Cross-project picker** — `o` lists sessions saved in other directories and moves one here as a new tab (it keeps running in its original directory)
+- **Cross-project jump** — the palette also lists sessions saved in other directories; opening one moves it here as a new tab (it keeps running in its original directory)
 - **Reorder tabs** — `H` / `L` move the highlighted tab left/right
 - **Crash recovery** — if a tab's `claude` process dies, a banner appears and Enter restarts it, resuming the conversation
 - **Confirm-on-quit** — Ctrl+D prompts before closing all sessions
@@ -107,7 +107,6 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 | `H` / `L` | Move highlighted session left / right |
 | `i` / `a` | Enter INSERT mode |
 | `n` | New session |
-| `o` | Open a session from another project (moves it here) |
 | `d` | Delete highlighted session (with confirmation) |
 | `Ctrl+C` | Delete active session (with confirmation) |
 | `Ctrl+D` | Quit |
@@ -128,7 +127,7 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 | `R` | Rename the highlighted tab's group (empty input clears the name) |
 | `v` | Toggle the changes panel for the active session |
 | `t` | Open the theme menu (pick a preset or set the accent color) |
-| `/` | Search / filter sessions |
+| `/` or `o` | Open the session palette (fuzzy jump; also reaches other projects) |
 
 ### Split pane (NORMAL mode)
 
@@ -185,6 +184,28 @@ Space to page, `g`/`G` for top/bottom) and filters:
 
 - **NORMAL** (blue status bar) — keyboard navigation active
 - **INSERT** (orange status bar) — input field focused, type messages to Claude
+
+## Session Palette
+
+`/` (or `o`) opens a fuzzy finder over every session — this project's tabs and
+every session saved under another directory:
+
+```
+╭─ Go to session ────────────────────────────────────╮
+│ › api                                            4 │
+│ ───                                                │
+│ ▶ ▍api          backend   ⎇ main  ✱                │
+│   ▍api-tests    backend   ⎇ main                   │
+│   rapid-proto              ⎇ spike                 │
+│   api-gw                   ⎇ main      ~/other-repo│
+╰────────────────────────────────────────────────────╯
+```
+
+- Type to filter. Matching runs over the session name first, then its group, branch and directory, so any of them will find it.
+- `↑`/`↓` or `Ctrl+p`/`Ctrl+n` move; Enter opens; Esc cancels; `Ctrl+u` clears the query.
+- Rows carry the same state as the tab bar — status dot, group tag, branch, `✱` dirty marker — so the palette doubles as an overview when tabs are folded or scrolled out of the bar.
+- This project's tabs rank above sessions from elsewhere. Picking one of those moves it here as a new tab, exactly as the old `o` picker did.
+- Selecting a tab inside a folded group unfolds it first.
 
 ## Session List
 
