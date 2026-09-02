@@ -34,7 +34,9 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - [Claude Code](https://claude.ai/code) installed and authenticated (`claude` in PATH)
 - A modern terminal (truecolor + mouse support recommended)
 
-> The installed binary is fully self-contained (the Bun runtime is embedded) — Bun is only needed if you build from source. Prebuilt binaries are published for Linux (x86_64/aarch64) and macOS (Apple Silicon / arm64) on each [release](https://github.com/AbdelzaherAbdelgwad/claude-sessions-manager-tui/releases). Intel Macs: build from source.
+> The installed binary is fully self-contained (the Bun runtime is embedded) — Bun is only needed if you build from source. Prebuilt binaries are published for Linux (x86_64/aarch64), macOS (Apple Silicon / arm64) and Windows (x64) on each [release](https://github.com/AbdelzaherAbdelgwad/claude-sessions-manager-tui/releases). Intel Macs and Windows on ARM: build from source.
+
+On Windows, use [Windows Terminal](https://aka.ms/terminal) rather than the legacy console host — csm needs truecolor and mouse reporting.
 
 ## Install
 
@@ -44,11 +46,19 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 yay -S csm-bin   # or: paru -S csm-bin
 ```
 
-**One-liner:**
+**One-liner (Linux / macOS):**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AbdelzaherAbdelgwad/claude-sessions-manager-tui/master/install.sh | bash
 ```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/AbdelzaherAbdelgwad/claude-sessions-manager-tui/master/install.ps1 | iex
+```
+
+Installs `csm.exe` to `%LOCALAPPDATA%\Programs\csm` and puts it on your user PATH.
 
 **Manual (download the binary directly):**
 
@@ -58,6 +68,8 @@ curl -fsSL https://github.com/AbdelzaherAbdelgwad/claude-sessions-manager-tui/re
 chmod +x ~/.local/bin/csm
 ```
 
+On Windows, download `csm-windows-x64.exe` from the release and put it anywhere on your PATH.
+
 Then launch with:
 
 ```bash
@@ -66,10 +78,16 @@ csm
 
 ## Uninstall
 
-**One-liner:**
+**One-liner (Linux / macOS):**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AbdelzaherAbdelgwad/claude-sessions-manager-tui/master/uninstall.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/AbdelzaherAbdelgwad/claude-sessions-manager-tui/master/uninstall.ps1 | iex
 ```
 
 **Manual:**
@@ -92,6 +110,13 @@ Build a standalone binary for your platform:
 ```bash
 bun run build      # → dist/csm
 ```
+
+Release binaries are built on a runner matching each target rather than
+cross-compiled: OpenTUI resolves its native library with
+``await import(`@opentui/core-${process.platform}-${process.arch}`)``, so the
+compiled binary embeds whichever platform package `bun install` fetched at build
+time. `--target=bun-windows-x64` from Linux would produce an `.exe` carrying the
+Linux native library.
 
 Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.g. `git tag v0.1.0 && git push origin v0.1.0`), which builds the per-platform binaries and attaches them to the release.
 

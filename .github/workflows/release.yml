@@ -49,6 +49,12 @@ jobs:
           - os: macos-14
             target: bun-darwin-arm64
             asset: csm-macos-arm64
+          # Windows must build on a Windows runner, not cross-compile: opentui
+          # loads its native lib via `import(`@opentui/core-${platform}-${arch}`)`,
+          # so the binary embeds whichever platform package `bun install` fetched.
+          - os: windows-latest
+            target: bun-windows-x64
+            asset: csm-windows-x64.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -63,15 +69,25 @@ jobs:
 
   publish-aur:
     needs: build
+    # AUR only ships the Linux binaries, so a failure on another matrix leg
+    # (Windows, macOS) must not hold back the Arch package. The checksum step
+    # below hard-fails if the Linux assets themselves are missing.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - name: Generate PKGBUILD
         run: |
+          set -euo pipefail
           pkgver="${GITHUB_REF_NAME#v}"
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
-          sha_x64=$(curl -sfL "${base}/csm-linux-x64" | sha256sum | cut -d' ' -f1)
-          sha_arm64=$(curl -sfL "${base}/csm-linux-arm64" | sha256sum | cut -d' ' -f1)
+          # Download to a file rather than piping: a failed curl piped into
+          # sha256sum still yields the hash of empty input, which would publish
+          # a PKGBUILD whose checksums match nothing.
+          curl -fsSL "${base}/csm-linux-x64" -o csm-linux-x64
+          curl -fsSL "${base}/csm-linux-arm64" -o csm-linux-arm64
+          sha_x64=$(sha256sum csm-linux-x64 | cut -d' ' -f1)
+          sha_arm64=$(sha256sum csm-linux-arm64 | cut -d' ' -f1)
           sha_license=$(sha256sum LICENSE | cut -d' ' -f1)
           sed -e "s/@PKGVER@/${pkgver}/" \
               -e "s/@SHA_X64@/${sha_x64}/" \
