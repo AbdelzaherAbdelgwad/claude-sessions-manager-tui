@@ -25,6 +25,11 @@ import {
 } from "./src/gitInfo"
 import { WorktreeModal } from "./src/components/WorktreeModal"
 import { ComposeModal } from "./src/components/ComposeModal"
+import { NotebookModal } from "./src/components/NotebookModal"
+import {
+  loadNote, saveNote, notePath, renumber,
+  cycleHeader, toggleList, indentLine, toggleWrap, newlineContinuingList,
+} from "./src/notebook"
 import { wordStartBefore, caretVertical } from "./src/compose"
 import { fuzzyScoreFields } from "./src/fuzzy"
 import { DiffPanel } from "./src/components/DiffPanel"
@@ -188,6 +193,11 @@ function App() {
   const [composeOpen, setComposeOpen] = useState(false)
   const [composeText, setComposeText] = useState("")
   const [composeCaret, setComposeCaret] = useState(0)
+  // Notebook (`N`): a per-project Markdown scratchpad.
+  const [noteOpen, setNoteOpen] = useState(false)
+  const [noteText, setNoteText] = useState("")
+  const [noteCaret, setNoteCaret] = useState(0)
+  const [noteSaved, setNoteSaved] = useState(true)
   // Terminal width in columns, tracked so the tab bar can window on overflow.
   const [termWidth, setTermWidth] = useState(renderer.terminalWidth)
   const [termHeight, setTermHeight] = useState(renderer.terminalHeight)
@@ -251,6 +261,10 @@ function App() {
   const composeCaretRef = useRef(0)
   const composeWidthRef = useRef(60)
   const drafts = useRef(new Map<number, string>())
+  const noteOpenRef = useRef(false)
+  const noteTextRef = useRef("")
+  const noteCaretRef = useRef(0)
+  const noteWidthRef = useRef(60)
   // The nav entries the tab bar shows, mirrored for the input-handler closure.
   // highlightedIdx indexes THIS, not the session list — a collapsed group is one
   // entry covering several sessions. Refreshed on every render.
@@ -277,6 +291,9 @@ function App() {
   useEffect(() => { composeOpenRef.current = composeOpen }, [composeOpen])
   useEffect(() => { composeTextRef.current = composeText }, [composeText])
   useEffect(() => { composeCaretRef.current = composeCaret }, [composeCaret])
+  useEffect(() => { noteOpenRef.current = noteOpen }, [noteOpen])
+  useEffect(() => { noteTextRef.current = noteText }, [noteText])
+  useEffect(() => { noteCaretRef.current = noteCaret }, [noteCaret])
   useEffect(() => { groupRenamingRef.current = groupRenaming }, [groupRenaming])
   useEffect(() => { groupRenameInputRef.current = groupRenameInput }, [groupRenameInput])
   // Both panes of a split are on screen, so neither may raise an attention flag.
@@ -901,6 +918,36 @@ function App() {
     setGroupRenameInput(idx > 0 ? config.groups[String(idx)] ?? "" : "")
   }
 
+  // ── Notebook ───────────────────────────────────────────────────────────────
+
+  // A Markdown scratchpad per project, kept as a plain .md file so it can be
+  // read and edited outside csm. Markers stay visible in the buffer and are
+  // styled rather than hidden, which keeps one source character to one cell and
+  // the caret arithmetic exact.
+  const openNote = async () => {
+    const text = await loadNote(process.cwd())
+    setNoteText(text); noteTextRef.current = text
+    setNoteCaret(text.length); noteCaretRef.current = text.length
+    setNoteSaved(true)
+    setNoteOpen(true)
+    renderer.requestRender()
+  }
+
+  const setNote = (text: string, caret: number) => {
+    const c = Math.max(0, Math.min(caret, text.length))
+    setNoteText(text); noteTextRef.current = text
+    setNoteCaret(c); noteCaretRef.current = c
+    setNoteSaved(false)
+  }
+
+  const persistNote = async () => {
+    await saveNote(process.cwd(), noteTextRef.current)
+    setNoteSaved(true)
+    renderer.requestRender()
+  }
+
+  const closeNote = () => { persistNote(); setNoteOpen(false) }
+
   // ── Compose buffer ─────────────────────────────────────────────────────────
 
   // INSERT mode types straight into Claude's own line editor inside the PTY,
@@ -1053,6 +1100,54 @@ function App() {
 
   useEffect(() => {
     const handler = (seq: string) => {
+      // The notebook is a text editor: like the compose buffer below, it has to
+      // be reached before Ctrl+C, Ctrl+D and the scroll keys are claimed.
+      if (noteOpenRef.current) {
+        const t = noteTextRef.current
+        const c = noteCaretRef.current
+        const w = noteWidthRef.current
+        const apply = (e: { text: string; caret: number }) => { setNote(e.text, e.caret); return true }
+
+        if (seq === "\x13") { persistNote(); return true }                       // Ctrl+S
+        if (seq === "\x1b") { closeNote(); return true }
+        if (seq === "\x03") { closeNote(); return true }                         // Ctrl+C
+        if (seq === "\x04") { return true }                                      // never quit from in here
+        if (seq === "\x14") return apply(cycleHeader(t, c))                      // Ctrl+T
+        if (seq === "\x02") return apply(toggleWrap(t, c, "**"))                 // Ctrl+B
+        if (seq === "\x09") return apply(toggleWrap(t, c, "*"))                  // Ctrl+I
+        if (seq === "\x0b") return apply(toggleWrap(t, c, "`"))                  // Ctrl+K
+        if (seq === "\x0c") return apply(toggleList(t, c, "bullet"))             // Ctrl+L
+        if (seq === "\x0f") {                                                    // Ctrl+O
+          const e = toggleList(t, c, "ordered")
+          return apply({ text: renumber(e.text), caret: e.caret })
+        }
+        if (seq === "\x1b[Z") return apply(indentLine(t, c, -1))                 // Shift+Tab
+        if (seq === "\r" || seq === "\n") {
+          const e = newlineContinuingList(t, c)
+          return apply({ text: renumber(e.text), caret: e.caret })
+        }
+        if (seq === "\x15") return apply({ text: "", caret: 0 })                 // Ctrl+U
+        if (seq === "\x17") {                                                    // Ctrl+W
+          const from = wordStartBefore(t, c)
+          return apply({ text: t.slice(0, from) + t.slice(c), caret: from })
+        }
+        if (seq === "\x01") { setNote(t, t.lastIndexOf("\n", Math.max(0, c - 1)) + 1); return true }
+        if (seq === "\x05") { const nl = t.indexOf("\n", c); setNote(t, nl < 0 ? t.length : nl); return true }
+        if (seq === "\x7f" || seq === "\b") { if (c > 0) setNote(t.slice(0, c - 1) + t.slice(c), c - 1); return true }
+        if (seq === "\x1b[3~") { if (c < t.length) setNote(t.slice(0, c) + t.slice(c + 1), c); return true }
+        if (seq === "\x1b[D") { setNote(t, c - 1); return true }
+        if (seq === "\x1b[C") { setNote(t, c + 1); return true }
+        if (seq === "\x1b[A") { setNote(t, caretVertical(t, c, w, -1)); return true }
+        if (seq === "\x1b[B") { setNote(t, caretVertical(t, c, w, 1)); return true }
+        // Tab indents; it is checked after Shift+Tab so the two do not collide.
+        if (seq === "\t") return apply(indentLine(t, c, 1))
+        if (!seq.startsWith("\x1b") && seq.charCodeAt(0) >= 32) {
+          setNote(t.slice(0, c) + seq + t.slice(c), c + seq.length)
+          return true
+        }
+        return true
+      }
+
       // First: while the compose buffer is open every key is editing input,
       // including Ctrl+C/Ctrl+D and the scroll keys the global bindings claim.
       if (composeOpenRef.current) {
@@ -1241,6 +1336,7 @@ function App() {
         if (seq === "R") { openGroupRename(); return true }
         if (seq === "w") { openWorktreeModal(); return true }
         if (seq === "p") { openCompose(); return true }
+        if (seq === "N") { openNote(); return true }
         if (seq === "s") { toggleSplit(); return true }
         if (seq === "S") { cycleSplitLayout(); return true }
         if (seq === "\t" && splitIdRef.current !== null) { focusOtherPane(); return true }
@@ -1406,6 +1502,12 @@ function App() {
     const onPaste = (e: any) => {
       const text = typeof e?.text === "string" ? e.text : new TextDecoder().decode(e?.bytes ?? new Uint8Array())
       if (!text) return
+      if (noteOpenRef.current) {
+        const t = noteTextRef.current, c = noteCaretRef.current
+        setNote(t.slice(0, c) + text + t.slice(c), c + text.length)
+        renderer.requestRender()
+        return
+      }
       if (composeOpenRef.current) { insertCompose(text); renderer.requestRender(); return }
       if (themeEditingRef.current) {
         const hex = text.replace(/[^0-9a-fA-F#]/g, "")
@@ -1449,6 +1551,8 @@ function App() {
   // Modal is 80% wide with a border and padding either side.
   const composeWidth = Math.max(20, Math.floor(termWidth * 0.8) - 6)
   composeWidthRef.current = composeWidth
+  const noteWidth = Math.max(20, Math.floor(termWidth * 0.8) - 6)
+  noteWidthRef.current = noteWidth
   // One filtered list drives both the tab bar and NORMAL-mode navigation.
   const sessionGroupColors = groupColors(sessions)
 
@@ -1625,6 +1729,17 @@ function App() {
       )}
 
       {renaming !== null && <RenameModal input={renameInput} onInputChange={setRenameInput} />}
+
+      {noteOpen && (
+        <NotebookModal
+          text={noteText}
+          caret={noteCaret}
+          width={noteWidth}
+          rows={Math.max(3, Math.min(22, termHeight - 16))}
+          path={notePath(process.cwd()).replace(process.env.HOME ?? "~", "~")}
+          saved={noteSaved}
+        />
+      )}
 
       {composeOpen && (
         <ComposeModal

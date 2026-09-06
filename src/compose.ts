@@ -9,6 +9,9 @@ export interface ComposeLayout {
   rows: string[]
   caretRow: number
   caretCol: number
+  // Absolute index into `text` where each display row begins. The notebook
+  // styles characters by position, so it needs to map a row back to the source.
+  starts: number[]
 }
 
 // Break one logical line into display rows of at most `width`, preferring to
@@ -41,6 +44,7 @@ function wrapLine(line: string, width: number): string[] {
 export function layoutCompose(text: string, caret: number, width: number): ComposeLayout {
   const clamped = Math.max(0, Math.min(caret, text.length))
   const rows: string[] = []
+  const starts: number[] = []
   let caretRow = 0
   let caretCol = 0
 
@@ -65,13 +69,14 @@ export function layoutCompose(text: string, caret: number, width: number): Compo
         caretCol = clamped - startsAt
       }
       rows.push(row)
+      starts.push(startsAt)
       // A soft break may have consumed a space that is not in either row.
       offset += row.length + (isLast ? 0 : (line[offset + row.length] === " " ? 1 : 0))
     }
     consumed += line.length + 1 // + the newline
   }
 
-  return { rows, caretRow, caretCol }
+  return { rows, caretRow, caretCol, starts }
 }
 
 // Index of the start of the word before `caret`, for Ctrl+W.

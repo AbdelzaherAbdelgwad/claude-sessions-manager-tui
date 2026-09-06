@@ -9,6 +9,7 @@ const HELP_LINES = [
   ["Enter / Space", "open session + insert mode"],
   ["i / a", "enter insert mode"],
   ["p", "compose a prompt in an editor, Ctrl+S to send it"],
+  ["N", "notebook — a Markdown scratchpad for this project"],
   ["r", "rename session"],
   ["e", "session env vars: type KEY=VALUE to add, ↑↓+r to remove (respawns claude)"],
   ["*", "star/unstar session (sorts to front)"],

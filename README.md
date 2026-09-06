@@ -30,6 +30,7 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - **Crash recovery** — if a tab's `claude` process dies, a banner appears and Enter restarts it, resuming the conversation
 - **Confirm-on-quit** — Ctrl+D prompts before closing all sessions
 - **Direct passthrough** — in INSERT mode, all keys (including `/commands`, arrows, Tab) go straight to Claude Code
+- **Notebook** — `N` opens a Markdown scratchpad per project, with headings, bold, bullet and numbered lists and indentation, saved as a plain `.md` file
 - **Compose buffer** — `p` opens a real editor for long prompts: newlines, cursor movement, word delete, and a per-session draft that survives closing it; `Ctrl+S` sends the whole thing as one paste
 
 ## Requirements
@@ -110,6 +111,7 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 | `H` / `L` | Move highlighted session left / right |
 | `i` / `a` | Enter INSERT mode |
 | `p` | Compose a prompt in an editor and send it (`Ctrl+S`) |
+| `N` | Open the notebook — a Markdown scratchpad for this project |
 | `n` | New session |
 | `T` | New terminal tab — a plain shell instead of Claude |
 | `w` | New session in a fresh git worktree (prompts for a branch) |
@@ -221,6 +223,41 @@ restoring a saved shell tab starts a fresh shell in the same directory.
 
 Set `behavior.shell` to choose the command; otherwise it's `$SHELL -l`, falling
 back to whichever of `bash`, `zsh` or `sh` exists.
+
+## Notebook
+
+`N` opens a scratchpad for the current project — somewhere to keep the things
+that don't belong in a session: what you asked an agent to do, what to check
+next, a snippet you'll need again.
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+T` | Cycle heading: none → `#` → `##` → `###` → none |
+| `Ctrl+B` | Bold the word at the caret (again to unbold) |
+| `Ctrl+I` | Italic |
+| `Ctrl+K` | Inline code |
+| `Ctrl+L` | Toggle a bullet item |
+| `Ctrl+O` | Toggle a numbered item |
+| `Tab` / `Shift+Tab` | Indent / outdent by two spaces |
+| `Enter` | New line — inside a list, continues it |
+| `Ctrl+W` / `Ctrl+U` | Delete the previous word / clear |
+| `Ctrl+A` / `Ctrl+E` | Start / end of line |
+| `Ctrl+S` | Save without closing |
+| `Esc` | Save and close |
+
+The buffer holds plain Markdown and **the markers stay visible** — `**bold**`
+shows its asterisks, dimmed, with the text between them bold. Hiding them would
+mean every caret movement had to step over characters that aren't there; showing
+them keeps one source character to one cell, so nothing about moving around is
+surprising.
+
+Lists behave the way you'd expect: `Enter` on a list item starts the next one,
+numbering carries on, an empty item ends the list, and numbers are renumbered
+after every change — including nested runs, which count independently.
+
+Notes are saved to `~/.claude-sessions-manager/notes/<project>.md`, one per
+launch directory, as ordinary Markdown you can open in any editor. The path is
+shown at the bottom of the modal, along with whether the current text is saved.
 
 ## Compose Buffer
 
