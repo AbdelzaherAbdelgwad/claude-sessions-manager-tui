@@ -24,7 +24,7 @@ export function EnvModal({ input, vars, selected }: Props) {
       <box style={{ marginTop: 1, border: true, borderStyle: "rounded", borderColor: "#00FF88", paddingX: 1 }}>
         <text style={{ fg: "#FFFFFF" }}>{input || " "}</text>
       </box>
-      <text style={{ fg: "#555555", marginTop: 1 }}>Type KEY=VALUE + Enter to add · ↑↓ select + r to remove · Esc to cancel</text>
+      <text style={{ fg: "#555555", marginTop: 1 }}>Type or paste KEY=VALUE + Enter to add · ↑↓ select + r to remove · Esc to cancel</text>
     </box>
   )
 }

@@ -1238,8 +1238,17 @@ function App() {
         }
         if (seq === "\x1b") { setEnvModal(null); setEnvInput(""); setEnvSel(-1); return true }
         if (seq === "\x7f" || seq === "\b") { setEnvInput(s => s.slice(0, -1)); return true }
-        // Typing switches to add-mode: clear any list selection.
-        if (seq.length === 1 && seq.charCodeAt(0) >= 32) { setEnvSel(-1); setEnvInput(s => s + seq); return true }
+        // Typing switches to add-mode: clear any list selection. Pasted text can
+        // also arrive here as one chunk (terminals that don't emit a separate
+        // bracketed-paste event), so accept multi-char sequences too: strip the
+        // paste markers, ignore anything still holding an ESC (that's a control
+        // sequence, not text), and keep only the first line — a KEY=VALUE entry
+        // is single-line.
+        const typed = seq.replace(/\x1b\[20[01]~/g, "")
+        if (typed && !typed.includes("\x1b")) {
+          const text = typed.split(/[\r\n]/)[0].replace(/[\x00-\x1f\x7f]/g, "")
+          if (text) { setEnvSel(-1); setEnvInput(s => s + text); return true }
+        }
         return true
       }
 
@@ -1494,9 +1503,10 @@ function App() {
 
   // Bracketed paste (e.g. Ctrl+Shift+V) is delivered by OpenTUI as a separate
   // `paste` event, NOT through the input handlers — so without this, paste does
-  // nothing anywhere in the app. Route it: into the accent-hex field when that's
-  // being edited, otherwise forward to the active session's PTY re-wrapped in
-  // bracketed-paste markers so Claude Code treats multiline pastes as one paste
+  // nothing anywhere in the app. Route it: into whichever text surface is open
+  // (note, compose, env var input, accent-hex field), otherwise forward to the
+  // active session's PTY re-wrapped in bracketed-paste markers so Claude Code
+  // treats multiline pastes as one paste
   // (raw newlines would otherwise submit the prompt line-by-line).
   useEffect(() => {
     const onPaste = (e: any) => {
@@ -1509,6 +1519,12 @@ function App() {
         return
       }
       if (composeOpenRef.current) { insertCompose(text); renderer.requestRender(); return }
+      if (envModalRef.current !== null) {
+        // KEY=VALUE is one line: take the first line, drop control chars.
+        const line = text.split(/[\r\n]/)[0].replace(/[\x00-\x1f\x7f]/g, "")
+        if (line) { setEnvSel(-1); setEnvInput(s => s + line); renderer.requestRender() }
+        return
+      }
       if (themeEditingRef.current) {
         const hex = text.replace(/[^0-9a-fA-F#]/g, "")
         if (hex) { setThemeEdit(s => (s + hex).slice(0, 7)); renderer.requestRender() }

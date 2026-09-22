@@ -11,7 +11,7 @@ const HELP_LINES = [
   ["p", "compose a prompt in an editor, Ctrl+S to send it"],
   ["N", "notebook — a Markdown scratchpad for this project"],
   ["r", "rename session"],
-  ["e", "session env vars: type KEY=VALUE to add, ↑↓+r to remove (respawns claude)"],
+  ["e", "session env vars: type/paste KEY=VALUE to add, ↑↓+r to remove (respawns claude)"],
   ["*", "star/unstar session (sorts to front)"],
   ["c", "cycle color tag — same-tag tabs nest under one group tab"],
   ["z", "fold / unfold the highlighted tab's group (or click its ▾)"],

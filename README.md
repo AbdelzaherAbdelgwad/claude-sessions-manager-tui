@@ -21,7 +21,7 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - **Faithful colors** — Claude's output keeps your terminal's own ANSI palette (queried once via OSC 4) and its text styles (bold, dim, italic, underline, strikethrough), so a session looks like plain `claude` does
 - **Favorites** — star sessions (`*`); they sort to the front
 - **Rename** sessions (`r`) and jump between them with the **session palette** (`/`) — fuzzy search over every tab and every session saved in another project
-- **Per-session env vars** — press `e` to add (`KEY=VALUE`) a var on the active session, or `↑`/`↓` to pick an existing var and `r` to remove it; `claude` respawns (in-memory only, not persisted)
+- **Per-session env vars** — press `e` to add (`KEY=VALUE`, typed or pasted) a var on the active session, or `↑`/`↓` to pick an existing var and `r` to remove it; `claude` respawns (in-memory only, not persisted)
 - **Per-project session persistence** — tabs (names, favorites, order) are saved per launch directory and restored
 - **Conversation resume** — restored tabs reopen the actual Claude conversation (`claude --resume`)
 - **Startup chooser** — on launch, Resume this directory's sessions or Start new
@@ -125,7 +125,7 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 |-----|--------|
 | `1` – `9` | Jump to session N |
 | `r` | Rename session |
-| `e` | Session env vars — type `KEY=VALUE` to add, or `↑`/`↓` to pick an existing var and `r` to remove it; respawns `claude` (resumes the conversation) |
+| `e` | Session env vars — type or paste `KEY=VALUE` to add, or `↑`/`↓` to pick an existing var and `r` to remove it; respawns `claude` (resumes the conversation) |
 | `*` | Star / unstar session (sorts to front) |
 | `c` | Cycle the highlighted session's color tag (moves the tab into that group) |
 | `z` | Fold / unfold the highlighted tab's group |
