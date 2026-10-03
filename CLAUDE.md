@@ -22,29 +22,71 @@ into an off-screen grid, then copied into the terminal box each frame.
   single keyboard handler (NORMAL vs INSERT mode routing), session lifecycle,
   and modal wiring. State that the PTY callbacks mutate lives in module-level
   maps (see `pty.ts`), not React state, to avoid per-byte re-renders; refs mirror
-  state for use inside the input-handler closure.
-- **`src/pty.ts`** — PTY lifecycle. `ptySessions` (id → {xterm, pty, proc}),
-  `pinnedToBottom` (auto-scroll set), `activity` (id → streaming?, drives the tab
-  spinner). `spawnSession(id, cols, rows, onUpdate, {claudeSessionId, cwd})`
-  runs `claude --session-id|--resume <uuid>` in the saved cwd. `killSession`.
+  state for use inside the input-handler closure. Modals are handled in the
+  handler before the global keys, so an open overlay can own `Ctrl+D` etc.
+- **`src/pty.ts`** — PTY lifecycle and the per-session status maps the tab bar
+  reads: `ptySessions` (id → {xterm, pty, proc, exited}), `pinnedToBottom`
+  (auto-scroll set), `sessionEnv` (per-session env vars, in-memory only),
+  `activity` (streaming → spinner), `waiting` (turn finished), `attention`
+  (finished while you were on another tab; cleared by `setVisibleSessions`).
+  `spawnSession(id, cols, rows, onUpdate, opts)` runs `claude
+  --session-id|--resume <uuid>` — or `shellCommand()` for a shell tab — in the
+  saved cwd. `onSessionWaiting` is the hook the git reads fire on.
+  `killSession`.
 - **`src/render.ts`** — `paintXterm(buffer, box, xterm)`: copies the xterm grid
   into the OpenTUI box region. Called from the box's `renderAfter`.
 - **`src/colors.ts`** — adapts xterm's packed cell colors → OpenTUI `RGBA`
   (`xtermColor`) and styles → attr bitmask (`cellAttrs`). Only consumed by
   `render.ts`.
+- **`src/config.ts`** — `~/.claude-sessions-manager/config.json`, deep-merged
+  over `DEFAULTS` and written on first run. `config` is the live singleton every
+  component reads for `colors` / `timing` / `behavior` / `groups`; `THEMES` are
+  the presets, and `applyTheme` / `setColor` / `setBehavior` / `setGroupName`
+  mutate it and persist. No React state — a change needs a re-render to show.
 - **`src/persistence.ts`** — `~/.claude-sessions-manager/state.json`, a v3
   `projects` map keyed by launch cwd: `loadState`/`saveState` touch only the
   `process.cwd()` entry (read-modify-write), so resume suggestions are
   per-directory and other projects' sessions are never clobbered. Migrates
   v1/v2 flat lists by grouping on each session's `cwd`. `freshSessionId`
   (collision-guarded UUID mint), `conversationExists` (globs
-  `~/.claude/projects/*/<uuid>.jsonl` to decide resume vs fresh).
-- **`src/types.ts`** — `Mode`, `Session` (id, name, favorite?, claudeSessionId, cwd),
-  `PtySession`.
-- **`src/components/*.tsx`** — dumb presentational components: `SessionList`
-  (top tab bar), `TerminalView` (box that hosts the paint target via `termBoxRef`),
-  `StatusBar`, and modals (`Help`, `DeleteConfirm`, `QuitConfirm`, `Search`,
-  `Rename`, `Startup`).
+  `~/.claude/projects/*/<uuid>.jsonl` to decide resume vs fresh),
+  `loadOtherProjects` / `takeSession` for the palette's cross-project jumps.
+- **`src/gitInfo.ts`** — everything git except the diff text itself.
+  `gitBranch(cwd)` reads `.git/HEAD` as a file (no subprocess, cheap enough to
+  poll per tab); `gitDirty` and `gitChanges` spawn git (`status --porcelain` +
+  `diff --numstat HEAD`) and so are recomputed only when a session finishes a
+  turn, never per frame. `editorCommand` resolves `$VISUAL`/`$EDITOR` and says
+  whether it's a GUI editor (detach) or a terminal one (suspend the renderer).
+  `repoRoot` / `branchExists` / `worktreePath` / `addWorktree` / `removeWorktree`
+  back the worktree sessions.
+- **`src/diff.ts`** — one file's diff, for the inline viewer. `fileDiff(cwd,
+  path, code)` runs `git diff HEAD -- <path>` (staged + unstaged together), or
+  `--no-index` against `/dev/null` for an untracked file; its own subprocess
+  helper, because `--no-index` exits 1 whenever the files differ.
+  `parseUnified` → typed rows (`hunk`/`ctx`/`add`/`del`/`meta`) carrying both
+  sides' line numbers, tabs expanded to stops, 20k-row cap. `refine` marks the
+  changed words inside a paired del/add line. The file list itself still comes
+  from `gitInfo.gitChanges`.
+- **`src/compose.ts`** — text-area mechanics shared by the compose buffer and
+  the notebook: `layoutCompose` wraps text to a width and maps the caret to a
+  row/column, `wordStartBefore` (Ctrl+W) and `caretVertical` (up/down).
+- **`src/notebook.ts`** — the per-project Markdown scratchpad: `loadNote` /
+  `saveNote` / `notePath`, the editing commands (`cycleHeader`, `toggleList`,
+  `indentLine`, `toggleWrap`, `newlineContinuingList`, `renumber`), and the
+  inline highlighter (`lineKind`, `styleLine` → `S_*` flag bitmask per char).
+- **`src/fuzzy.ts`** — `fuzzyScore` / `fuzzyScoreFields`, the subsequence
+  ranking behind the session palette (`/`); the help modal's search is a plain
+  substring filter.
+- **`src/types.ts`** — `Mode`, `SessionKind`, `Session` (id, name, favorite?,
+  color?, claudeSessionId, cwd, kind?, worktree?), `PtySession`, and `NavEntry`
+  — one addressable slot in the tab bar, which is what `highlightedIdx` indexes
+  (a collapsed group is a single entry standing in for its members).
+- **`src/components/*.tsx`** — dumb presentational components, no state of their
+  own: `SessionList` (top tab bar, groups and overflow chevrons), `TerminalView`
+  (box that hosts the paint target via `termBoxRef`), `StatusBar`, `DiffPanel`
+  (the `v` changes list), `DiffViewer` (the full-screen diff overlay), and the
+  modals — `Help`, `DeleteConfirm`, `QuitConfirm`, `Palette`, `Rename`,
+  `Startup`, `Compose`, `Notebook`, `Env`, `Theme`, `Worktree`.
 
 ## Conventions / gotchas
 
@@ -55,6 +97,13 @@ into an off-screen grid, then copied into the terminal box each frame.
 - INSERT mode forwards every keystroke straight to the PTY; NORMAL mode is for
   navigation. Adding/deleting/navigating sessions stays in NORMAL.
 - Conversation resume is **cwd-scoped** — sessions store and respawn in their cwd.
+- The diff viewer covers the whole terminal area, and the `renderAfter` hooks
+  skip `paintXterm` while it's open — that paint is a per-frame loop over every
+  cell, and scrolling a diff would otherwise pay for it on every keystroke. Any
+  new full-screen overlay should do the same, and must stay full width, or the
+  unpainted terminal shows at the edges.
+- Overlay rows are keyed by **viewport slot**, not by line index: keying by
+  index rebuilds every renderable on each scroll.
 
 ## Workflow
 
