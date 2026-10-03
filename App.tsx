@@ -33,6 +33,8 @@ import {
 import { wordStartBefore, caretVertical } from "./src/compose"
 import { fuzzyScoreFields } from "./src/fuzzy"
 import { DiffPanel } from "./src/components/DiffPanel"
+import { DiffViewer } from "./src/components/DiffViewer"
+import { fileDiff, hunkStarts, type DiffLine } from "./src/diff"
 
 // Fail fast with a readable error instead of a blank TUI when claude is absent
 if (!Bun.which("claude")) {
@@ -176,8 +178,20 @@ function App() {
   // Cursor over the panel's file list; -1 = nothing picked, so Enter still
   // belongs to the tab bar until you actually select a file.
   const [diffSel, setDiffSel] = useState(-1)
+  // Whether the changes panel holds keyboard focus. Tab moves focus between the
+  // session pane(s) and the panel; while the panel has it, the arrow keys and
+  // Enter belong to the file list rather than to the session underneath.
+  const [diffFocus, setDiffFocus] = useState(false)
   const [editorRunning, setEditorRunning] = useState(false)
   const [editorError, setEditorError] = useState<string | null>(null)
+  // Inline diff viewer: the parsed diff of one changed file, drawn by csm
+  // itself so reading a change doesn't mean leaving for $EDITOR.
+  const [diffViewPath, setDiffViewPath] = useState<string | null>(null)
+  const [diffViewLines, setDiffViewLines] = useState<DiffLine[] | null>(null)
+  const [diffViewLoading, setDiffViewLoading] = useState(false)
+  const [diffViewError, setDiffViewError] = useState<string | null>(null)
+  const [diffScroll, setDiffScroll] = useState(0)
+  const [diffHScroll, setDiffHScroll] = useState(0)
   // Worktree modal (`w`): branch name for a new worktree + its own session.
   const [worktreeOpen, setWorktreeOpen] = useState(false)
   const [worktreeInput, setWorktreeInput] = useState("")
@@ -252,6 +266,10 @@ function App() {
   const diffOpenRef = useRef(false)
   const diffSelRef = useRef(-1)
   const diffDataRef = useRef<GitChanges | null>(null)
+  const diffFocusRef = useRef(false)
+  const diffViewOpenRef = useRef(false)
+  const diffViewLinesRef = useRef<DiffLine[] | null>(null)
+  const diffViewRowsRef = useRef(20)
   const worktreeOpenRef = useRef(false)
   const worktreeInputRef = useRef("")
   const worktreeRootRef = useRef<string | null>(null)
@@ -285,6 +303,9 @@ function App() {
   useEffect(() => { diffOpenRef.current = diffOpen }, [diffOpen])
   useEffect(() => { diffSelRef.current = diffSel }, [diffSel])
   useEffect(() => { diffDataRef.current = diffData }, [diffData])
+  useEffect(() => { diffFocusRef.current = diffFocus }, [diffFocus])
+  useEffect(() => { diffViewOpenRef.current = diffViewPath !== null }, [diffViewPath])
+  useEffect(() => { diffViewLinesRef.current = diffViewLines }, [diffViewLines])
   useEffect(() => { worktreeOpenRef.current = worktreeOpen }, [worktreeOpen])
   useEffect(() => { worktreeInputRef.current = worktreeInput }, [worktreeInput])
   useEffect(() => { worktreeRootRef.current = worktreeRoot }, [worktreeRoot])
@@ -395,21 +416,96 @@ function App() {
     })
   }, [])
 
+  // Read one file's diff into the inline viewer. `keepScroll` is set when the
+  // same file is being re-read after an edit, so the view doesn't jump back to
+  // the top under the reader.
+  const openDiffView = useCallback((index: number, keepScroll = false) => {
+    const session = sessionsRef.current.find(s => s.id === activeIdRef.current)
+    const file = diffDataRef.current?.files[index]
+    if (!session || !file) return
+    setDiffSel(index)
+    // Set synchronously, not via the mirroring effect: git answers on its own
+    // schedule and the callback below checks this ref to know it still matters.
+    diffViewOpenRef.current = true
+    setDiffViewPath(file.path)
+    setDiffViewError(null)
+    setDiffViewLoading(true)
+    if (!keepScroll) { setDiffScroll(0); setDiffHScroll(0) }
+    fileDiff(session.cwd, file.path, file.code).then(lines => {
+      // The reader may have closed the viewer or moved on while git ran.
+      if (activeIdRef.current !== session.id || !diffViewOpenRef.current) return
+      setDiffViewLines(lines)
+      setDiffViewError(lines === null ? "could not read the diff" : null)
+      setDiffViewLoading(false)
+      renderer.requestRender()
+    })
+  }, [])
+
+  const closeDiffView = useCallback(() => {
+    diffViewOpenRef.current = false
+    setDiffViewPath(null)
+    setDiffViewLines(null)
+    setDiffViewError(null)
+    setDiffViewLoading(false)
+    setDiffScroll(0)
+    setDiffHScroll(0)
+  }, [])
+
+  // Stable identity: the viewer is memoized, and a fresh arrow prop each render
+  // would defeat that.
+  const onDiffWheel = useCallback((e: any) => {
+    const d = wheelSteps(e)
+    if (d) scrollDiff(d * 3)
+  }, [])
+
+  // Move the viewer to the next/previous file in the panel's list.
+  const stepDiffFile = useCallback((dir: 1 | -1) => {
+    const count = diffDataRef.current?.files.length ?? 0
+    if (count === 0) return
+    const next = Math.max(0, Math.min(count - 1, diffSelRef.current + dir))
+    if (next !== diffSelRef.current) openDiffView(next)
+  }, [openDiffView])
+
+  // Scroll by whole rows, clamped to the diff's length — the viewer clamps too,
+  // but keeping the state honest stops a long press from banking scroll.
+  const scrollDiff = useCallback((delta: number) => {
+    const len = diffViewLinesRef.current?.length ?? 0
+    const max = Math.max(0, len - diffViewRowsRef.current)
+    setDiffScroll(v => Math.max(0, Math.min(max, v + delta)))
+  }, [])
+
+  // Jump to the next/previous hunk header, so a long file can be skimmed by
+  // change rather than by line.
+  const jumpHunk = useCallback((dir: 1 | -1) => {
+    const starts = hunkStarts(diffViewLinesRef.current ?? [])
+    if (starts.length === 0) return
+    setDiffScroll(v => {
+      const next = dir === 1 ? starts.find(i => i > v) : [...starts].reverse().find(i => i < v)
+      if (next === undefined) return v
+      const len = diffViewLinesRef.current?.length ?? 0
+      return Math.max(0, Math.min(Math.max(0, len - diffViewRowsRef.current), next))
+    })
+  }, [])
+
   // A finished turn is the one moment the worktree can have changed, so that's
   // when both the dirty flag and the open diff panel are recomputed.
   useEffect(() => onSessionWaiting(id => {
     const session = sessionsRef.current.find(s => s.id === id)
     if (session) refreshDirty(id, session.cwd)
     if (diffOpenRef.current && activeIdRef.current === id) refreshDiff(id)
-  }), [refreshDirty, refreshDiff])
+    if (diffViewOpenRef.current && activeIdRef.current === id) openDiffView(diffSelRef.current, true)
+  }), [refreshDirty, refreshDiff, openDiffView])
 
   // Opening the panel, or switching the focused session while it's open, reads
   // fresh state for whatever is now on screen.
   useEffect(() => {
+    // The viewer belongs to one file of one session's panel; neither survives
+    // the panel closing or the focus moving to another session.
+    closeDiffView()
     if (!diffOpen) return
     setDiffData(null)
     refreshDiff(activeId)
-  }, [diffOpen, activeId, refreshDiff])
+  }, [diffOpen, activeId, refreshDiff, closeDiffView])
 
   // Open a changed file in $EDITOR. A terminal editor needs the TUI out of the
   // way and the child holding the real stdio, so the renderer is suspended for
@@ -451,7 +547,8 @@ function App() {
     // The file was very likely just edited, so re-read the worktree.
     refreshDirty(session.id, session.cwd)
     if (diffOpenRef.current) refreshDiff(session.id)
-  }, [refreshDirty, refreshDiff])
+    if (diffViewOpenRef.current) openDiffView(diffSelRef.current, true)
+  }, [refreshDirty, refreshDiff, openDiffView])
 
   // ── Track terminal width so the tab bar can window when tabs overflow ───────
 
@@ -508,7 +605,7 @@ function App() {
     if (!box) return
     const id = slot0Id
 
-    box.renderAfter = (buffer) => paintXterm(buffer, box, ptySessions.get(id)?.xterm)
+    box.renderAfter = (buffer) => { if (!diffViewOpenRef.current) paintXterm(buffer, box, ptySessions.get(id)?.xterm) }
 
     const onResized = () => syncSession(id, box.width, box.height)
     box.on(LayoutEvents.RESIZED, onResized)
@@ -523,7 +620,7 @@ function App() {
     if (!box || slot1Id === null) return
     const id = slot1Id
 
-    box.renderAfter = (buffer) => paintXterm(buffer, box, ptySessions.get(id)?.xterm)
+    box.renderAfter = (buffer) => { if (!diffViewOpenRef.current) paintXterm(buffer, box, ptySessions.get(id)?.xterm) }
 
     const onResized = () => syncSession(id, box.width, box.height)
     box.on(LayoutEvents.RESIZED, onResized)
@@ -613,6 +710,7 @@ function App() {
   // made copying text out of a session almost impossible to complete.
   const enterInsert = () => {
     setMode("insert")
+    if (diffFocusRef.current) { setDiffFocus(false); diffFocusRef.current = false }
   }
 
   // Hand the mouse to the terminal (for its own selection and scrollback) or
@@ -853,6 +951,24 @@ function App() {
     const slot: 0 | 1 = focusedSlotRef.current === 0 ? 1 : 0
     setFocusedSlot(slot); focusedSlotRef.current = slot
     setHighlightedIdx(entryIdxOf(sessionsRef.current, other))
+  }
+
+  // Give the changes panel the keyboard, picking the first file if the cursor
+  // is still unset — focusing an empty list would leave Enter with nothing to
+  // open, and the whole point of focusing is to work through the files.
+  const focusDiffPanel = () => {
+    setDiffFocus(true); diffFocusRef.current = true
+    if (diffSelRef.current < 0 && (diffDataRef.current?.files.length ?? 0) > 0) {
+      setDiffSel(0); diffSelRef.current = 0
+    }
+  }
+
+  // Hand the keyboard back to the session. With a split open, focus lands on
+  // the first pane, so Tab keeps cycling pane 0 → pane 1 → panel → pane 0
+  // rather than bouncing between the panel and whichever pane it came from.
+  const blurDiffPanel = () => {
+    setDiffFocus(false); diffFocusRef.current = false
+    if (splitIdRef.current !== null && focusedSlotRef.current === 1) focusOtherPane()
   }
 
   // Flip between side-by-side and stacked panes; the choice is persisted.
@@ -1180,6 +1296,28 @@ function App() {
         return true
       }
 
+      // The inline diff viewer is modal while it's open: like the notebook and
+      // the compose buffer above, it owns every key, including the global ones.
+      if (diffViewOpenRef.current) {
+        const page = Math.max(1, diffViewRowsRef.current - 2)
+        if (seq === "\x1b" || seq === "q" || seq === "v" || seq === "\x03") { closeDiffView(); return true }
+        if (seq === "j" || seq === "\x1b[B") { scrollDiff(1); return true }
+        if (seq === "k" || seq === "\x1b[A") { scrollDiff(-1); return true }
+        if (seq === "\x04" || seq === "\x1b[6~" || seq === " ") { scrollDiff(page); return true }
+        if (seq === "\x15" || seq === "\x1b[5~") { scrollDiff(-page); return true }
+        if (seq === "g") { setDiffScroll(0); return true }
+        if (seq === "G") { scrollDiff(Number.MAX_SAFE_INTEGER); return true }
+        if (seq === "n") { jumpHunk(1); return true }
+        if (seq === "N") { jumpHunk(-1); return true }
+        if (seq === "l" || seq === "\x1b[C") { setDiffHScroll(v => v + 4); return true }
+        if (seq === "h" || seq === "\x1b[D") { setDiffHScroll(v => Math.max(0, v - 4)); return true }
+        if (seq === "0") { setDiffHScroll(0); return true }
+        if (seq === "]") { stepDiffFile(1); return true }
+        if (seq === "[") { stepDiffFile(-1); return true }
+        if (seq === "E") { openChangedFile(diffSelRef.current); return true }
+        return true
+      }
+
       if (seq === "\x04") { setQuitConfirm(true); return true }
       if (showHelpRef.current && seq === "\x1b") { setShowHelp(false); return true }
       if (seq === "\x03") { setDeleteConfirm(activeIdRef.current); return true }
@@ -1294,7 +1432,7 @@ function App() {
 
       // Restart a dead claude with Enter (insert mode, or normal mode while the
       // dead tab is both active and highlighted — otherwise Enter still opens tabs)
-      if (seq === "\r") {
+      if (seq === "\r" && !diffViewOpenRef.current) {
         const id = activeIdRef.current
         const ps = ptySessions.get(id)
         const onActiveTab = entrySession(navEntriesRef.current[highlightedIdxRef.current])?.id === id
@@ -1315,11 +1453,31 @@ function App() {
         const entries = navEntriesRef.current
         const hl = entrySession(entries[highlightedIdxRef.current])
         const len = entries.length
+        // A focused changes panel owns the arrows, Enter and Esc; without focus
+        // the panel still answers j/k, and the arrows stay with the session.
+        if (diffFocusRef.current && diffOpenRef.current) {
+          const count = diffDataRef.current?.files.length ?? 0
+          const step = (d: 1 | -1) => {
+            if (count === 0) return
+            setDiffSel(i => Math.max(0, Math.min(count - 1, i < 0 ? 0 : i + d)))
+          }
+          if (seq === "j" || seq === "\x1b[B") { step(1); return true }
+          if (seq === "k" || seq === "\x1b[A") { step(-1); return true }
+          if (seq === "\r" && diffSelRef.current >= 0) { openDiffView(diffSelRef.current); return true }
+          if (seq === "E" && diffSelRef.current >= 0) { openChangedFile(diffSelRef.current); return true }
+          // The panel sits to the right of the session, so left leaves it.
+          if (seq === "\x1b" || seq === "h" || seq === "\x1b[D") { blurDiffPanel(); setDiffSel(-1); return true }
+          if (seq === "v") { blurDiffPanel(); setDiffOpen(false); setDiffSel(-1); return true }
+        }
         if (seq === "l" || seq === "\x1b[C") { setHighlightedIdx(i => Math.min(i + 1, len - 1)); return true }
         if (seq === "h" || seq === "\x1b[D") { setHighlightedIdx(i => Math.max(i - 1, 0)); return true }
         if (seq === "L") { moveSession(1); return true }
         if (seq === "H") { moveSession(-1); return true }
         if (seq === "\r" && diffOpenRef.current && diffSelRef.current >= 0) {
+          openDiffView(diffSelRef.current)
+          return true
+        }
+        if (seq === "E" && diffOpenRef.current && diffSelRef.current >= 0) {
           openChangedFile(diffSelRef.current)
           return true
         }
@@ -1333,7 +1491,7 @@ function App() {
         if (seq === "Z") { toggleAllGroups(); return true }
         if (seq === "u") { ungroupHighlighted(); return true }
         if (seq === "U") { ungroupAll(); return true }
-        if (seq === "v") { setDiffOpen(o => { if (o) setDiffSel(-1); return !o }); return true }
+        if (seq === "v") { setDiffOpen(o => { if (o) { setDiffSel(-1); blurDiffPanel() } return !o }); return true }
         // The panel owns j/k and, once a file is picked, Enter — see openChangedFile.
         if (diffOpenRef.current && (seq === "j" || seq === "k")) {
           const count = diffDataRef.current?.files.length ?? 0
@@ -1348,7 +1506,14 @@ function App() {
         if (seq === "N") { openNote(); return true }
         if (seq === "s") { toggleSplit(); return true }
         if (seq === "S") { cycleSplitLayout(); return true }
-        if (seq === "\t" && splitIdRef.current !== null) { focusOtherPane(); return true }
+        if (seq === "\t") {
+          // pane 0 → pane 1 (when split) → changes panel (when open) → pane 0
+          if (diffFocusRef.current) { blurDiffPanel(); return true }
+          if (splitIdRef.current !== null && focusedSlotRef.current === 0) { focusOtherPane(); return true }
+          if (diffOpenRef.current) { focusDiffPanel(); return true }
+          if (splitIdRef.current !== null) { focusOtherPane(); return true }
+          return true
+        }
         if (seq === "t") { setThemeSel(Math.max(0, themeNames.indexOf(config.theme))); setThemeEditing(false); setThemeEdit(""); setThemeModalOpen(true); return true }
         if (seq === "/") { openPalette(); return true }
         if (seq === "n") { addSession(); return true }
@@ -1569,6 +1734,12 @@ function App() {
   composeWidthRef.current = composeWidth
   const noteWidth = Math.max(20, Math.floor(termWidth * 0.8) - 6)
   noteWidthRef.current = noteWidth
+  // The viewer covers everything under the tab bar — which is also what lets
+  // the PTY paint be skipped while it's open (see the renderAfter hooks). Its
+  // row count is what the key handler pages by, so it is mirrored into a ref.
+  const diffViewWidth = Math.max(20, termWidth - 4)
+  const diffViewRows = Math.max(5, termHeight - 6)
+  diffViewRowsRef.current = diffViewRows
   // One filtered list drives both the tab bar and NORMAL-mode navigation.
   const sessionGroupColors = groupColors(sessions)
 
@@ -1651,7 +1822,7 @@ function App() {
           mouseEnabled={mouseEnabled}
           termBoxRef={slot0Ref}
           split={splitId !== null}
-          focused={focusedSlot === 0 || splitId === null}
+          focused={(focusedSlot === 0 || splitId === null) && !diffFocus}
           onMouseDown={() => { if (splitId !== null && focusedSlot === 1) focusOtherPane(); enterInsert() }}
           onScroll={slot0Id !== null ? wheel(slot0Id) : undefined}
         />
@@ -1661,7 +1832,7 @@ function App() {
             mouseEnabled={mouseEnabled}
             termBoxRef={slot1Ref}
             split
-            focused={focusedSlot === 1}
+            focused={focusedSlot === 1 && !diffFocus}
             onMouseDown={() => { if (focusedSlot === 0) focusOtherPane(); enterInsert() }}
             onScroll={wheel(slot1Id)}
           />
@@ -1676,7 +1847,8 @@ function App() {
           rows={Math.max(6, termHeight - 5)}
           width={diffWidth}
           selected={diffSel}
-          onOpenFile={(i) => { setDiffSel(i); openChangedFile(i) }}
+          focused={diffFocus}
+          onOpenFile={(i) => { focusDiffPanel(); openDiffView(i) }}
           editorRunning={editorRunning}
           editorError={editorError ?? undefined}
           onScroll={e => {
@@ -1702,6 +1874,23 @@ function App() {
         notice={statusNotice ?? undefined}
         mouseOff={!mouseEnabled}
       />
+
+      {diffViewPath !== null && (
+        <DiffViewer
+          path={diffViewPath}
+          lines={diffViewLines}
+          loading={diffViewLoading}
+          error={diffViewError ?? undefined}
+          scroll={diffScroll}
+          hscroll={diffHScroll}
+          rows={diffViewRows}
+          width={diffViewWidth}
+          left={0}
+          fileIndex={diffSel}
+          fileCount={diffData?.files.length ?? 0}
+          onScroll={onDiffWheel}
+        />
+      )}
 
       {deleteConfirm !== null && (
         <DeleteConfirmModal

@@ -15,6 +15,8 @@ interface Props {
   // meaning "open the highlighted session" until you actually pick a file.
   selected?: number
   onOpenFile?: (index: number) => void
+  // True while the panel holds the keyboard (Tab moves focus to and from it).
+  focused?: boolean
   // Set while an editor is running so the panel can say why nothing responds.
   editorRunning?: boolean
   // Reason the last open attempt failed, if any.
@@ -37,7 +39,7 @@ function fit(path: string, width: number): string {
   return path.length <= width ? path : "…" + path.slice(path.length - width + 1)
 }
 
-export function DiffPanel({ sessionName, branch, changes, loading, rows, width, selected = -1, onOpenFile, editorRunning, editorError, onScroll }: Props) {
+export function DiffPanel({ sessionName, branch, changes, loading, rows, width, selected = -1, focused = false, onOpenFile, editorRunning, editorError, onScroll }: Props) {
   const c = config.colors
   // header (2) + summary (1) + footer hint (1)
   const listRows = Math.max(1, rows - 4)
@@ -55,7 +57,8 @@ export function DiffPanel({ sessionName, branch, changes, loading, rows, width, 
       title=" changes "
       style={{
         width, flexShrink: 0, height: "100%", flexDirection: "column",
-        border: true, borderStyle: "rounded", borderColor: c.border, paddingX: 1,
+        // The accent border is the same signal a focused split pane carries.
+        border: true, borderStyle: "rounded", borderColor: focused ? c.active : c.border, paddingX: 1,
       }}
     >
       <box style={{ flexDirection: "row", width: "100%" }}>
@@ -104,8 +107,9 @@ export function DiffPanel({ sessionName, branch, changes, loading, rows, width, 
       <text style={{ fg: "#555555" }}>
         {editorRunning ? "editor open…"
           : files.length === 0 ? "v close · refreshes each turn"
-          : selected < 0 ? "j/k pick a file · v close"
-          : "Enter open in $EDITOR · Esc deselect · v close"}
+          : !focused ? "Tab to focus · j/k pick a file · v close"
+          : selected < 0 ? "↑↓ pick a file · Tab back · v close"
+          : "Enter diff · E $EDITOR · Tab/h back · v close"}
       </text>
     </box>
   )

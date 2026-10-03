@@ -14,8 +14,9 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - **Uncommitted-changes marker** — a `✱` on any tab whose worktree is dirty, so you can see which agent actually wrote files
 - **Terminal tabs** — `T` opens a plain shell as a tab instead of a Claude session, in the directory you're already in; everything else (groups, splits, git panel, status) works the same
 - **Worktree sessions** — `w` creates a git worktree for a branch and opens a session in it, so several agents can work on different branches of one repo at once without touching each other's files
-- **Changes panel** — `v` opens a side panel listing the changed files in the active session's directory, with per-file `+`/`-` counts; `j`/`k` pick a file and Enter opens it in `$EDITOR`
-- **Split pane** — press `s` to watch two sessions at once (side by side or stacked, `S` flips); `Tab` moves keyboard focus between them
+- **Changes panel** — `v` opens a side panel listing the changed files in the active session's directory, with per-file `+`/`-` counts; `j`/`k` pick a file
+- **Built-in diff viewer** — Enter on a picked file shows its diff in csm itself: line numbers for both sides, add/delete tinting, and the changed words inside an edited line highlighted — no editor, no pager, and it re-reads itself when the agent edits the file again
+- **Split pane** — press `s` to watch two sessions at once (side by side or stacked, `S` flips); `Tab` moves keyboard focus between them, and on to the changes panel when it's open
 - **Configurable** — theme presets, colors, timing thresholds, and display toggles via `~/.claude-sessions-manager/config.json`
 - **Tab groups** — tag tabs with a color (`c` cycles) and they nest inside one group tab in the bar; `R` names it, `z` folds it down to a single tab that carries its members' status
 - **Faithful colors** — Claude's output keeps your terminal's own ANSI palette (queried once via OSC 4) and its text styles (bold, dim, italic, underline, strikethrough), so a session looks like plain `claude` does
@@ -134,8 +135,10 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 | `U` | Ungroup every group |
 | `R` | Rename the highlighted tab's group (empty input clears the name) |
 | `v` | Toggle the changes panel for the active session |
-| `j` / `k` | With the panel open: move the file cursor |
-| `Enter` | With a file picked: open it in `$EDITOR` |
+| `Tab` | Move keyboard focus into the changes panel, and back out |
+| `j` / `k` | With the panel open: move the file cursor (`↑`/`↓` too, once it's focused) |
+| `Enter` | With a file picked: open its diff in the built-in viewer |
+| `E` | With a file picked: open it in `$EDITOR` instead |
 | `t` | Open the theme menu (pick a preset or set the accent color) |
 | `/` or `o` | Open the session palette (fuzzy jump; also reaches other projects) |
 
@@ -145,7 +148,7 @@ Releases are published automatically by GitHub Actions on pushing a `v*` tag (e.
 |-----|--------|
 | `s` | Split with the highlighted session / close the split |
 | `S` | Flip the layout (side-by-side ↔ stacked) — persisted to the config |
-| `Tab` | Move keyboard focus to the other pane |
+| `Tab` | Cycle keyboard focus: this pane → the other pane → the changes panel (when open) → back |
 
 Panes keep their place: `Tab` moves focus between them the way tmux does, it
 does not exchange their contents. Only the focused pane wears the accent border
@@ -411,7 +414,35 @@ Each session tracks the git state of its own directory.
 - The status bar shows the branch (`⎇ main`) and a `✱` when the worktree has uncommitted changes.
 - Tabs carry the same `✱`, so you can tell at a glance which background session actually wrote files.
 - `v` opens a **changes panel** beside the terminal, listing the changed paths in the active session's directory with their status codes and per-file `+`/`-` counts, plus a total. Untracked files are listed too.
-- In the panel, `j`/`k` move a file cursor and Enter opens that file in your editor (clicking a row does both). `Esc` deselects. Until you pick a file the cursor is unset, so Enter still opens the highlighted session — the panel only claims the key once you're actually in the list.
+- `Tab` moves keyboard focus into the panel and back out to the session; a focused panel wears the accent border, the same signal a focused split pane carries. With a split open the cycle runs pane → other pane → panel → back.
+- In the panel, `j`/`k` move a file cursor — and `↑`/`↓` do too once it's focused, where unfocused they still belong to the session. Enter opens that file's diff in the built-in viewer (clicking a row does both); `E` opens it in `$EDITOR` instead. `Esc`, `h` or `←` hands the keyboard back to the session. Until you pick a file the cursor is unset, so Enter still opens the highlighted session; focusing the panel picks the first file for you.
+
+### Diff viewer
+
+Enter on a picked file reads the diff and draws it in csm — `git diff HEAD` for
+a tracked file (so staged and unstaged edits appear together) and the whole
+file as an addition for an untracked one.
+
+- Both sides' line numbers sit in the gutter; additions and deletions carry
+  their own row tint, and hunk headers separate them.
+- Inside an edited line, the words that actually changed are highlighted on top
+  of the row tint. A line that was rewritten rather than edited is left plain —
+  highlighting all of it would say nothing the tint doesn't.
+- Binary files say so instead of printing a diff, and a very large diff is
+  truncated with a note rather than stalling the UI.
+- The viewer re-reads itself whenever the session finishes a turn, so a diff
+  left open follows the agent's edits.
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` or `↑` / `↓` | Scroll a line (the mouse wheel scrolls too) |
+| `Ctrl+D` / `Ctrl+U` | Page down / up (`Space`, `PgDn`, `PgUp` also work) |
+| `n` / `N` | Jump to the next / previous hunk |
+| `g` / `G` | Top / bottom |
+| `h` / `l` or `←` / `→` | Pan sideways for long lines (`0` snaps back) |
+| `[` / `]` | Previous / next changed file |
+| `E` | Open this file in `$EDITOR` |
+| `Esc`, `q` or `v` | Close the viewer |
 
 ### Worktree sessions
 
