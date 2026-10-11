@@ -19,7 +19,7 @@ Each session is an independent `claude` process running in a PTY, so conversatio
 - **Split pane** — press `s` to watch two sessions at once (side by side or stacked, `S` flips); `Tab` moves keyboard focus between them, and on to the changes panel when it's open
 - **Configurable** — theme presets, colors, timing thresholds, and display toggles via `~/.claude-sessions-manager/config.json`
 - **Tab groups** — tag tabs with a color (`c` cycles) and they nest inside one group tab in the bar; `R` names it, `z` folds it down to a single tab that carries its members' status
-- **Faithful colors** — Claude's output keeps your terminal's own ANSI palette (queried once via OSC 4) and its text styles (bold, dim, italic, underline, strikethrough), so a session looks like plain `claude` does
+- **Faithful colors** — Claude's output keeps your terminal's own ANSI palette (queried once via OSC 4) and its text styles (bold, dim, italic, underline, strikethrough), so a session looks like plain `claude` does — including 24-bit color, which survives even when csm itself was launched from a tmux pane
 - **Favorites** — star sessions (`*`); they sort to the front
 - **Rename** sessions (`r`) and jump between them with the **session palette** (`/`) — fuzzy search over every tab and every session saved in another project
 - **Per-session env vars** — press `e` to add (`KEY=VALUE`, typed or pasted) a var on the active session, or `↑`/`↓` to pick an existing var and `r` to remove it; `claude` respawns (in-memory only, not persisted)

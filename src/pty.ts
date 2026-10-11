@@ -100,6 +100,26 @@ export function shellCommand(): string[] {
   return ["sh"]
 }
 
+// Markers saying "you are inside a multiplexer". They describe the terminal csm
+// was launched from, not this PTY, whose far end is xterm.js — and Claude Code
+// reads them as "24-bit colour will not survive" and quantizes every hex it
+// renders down to the 256-colour cube. Inside tmux that turns a theme's
+// #15204a into palette index 23, which is how a session launched from a tmux
+// pane ends up looking nothing like the same session launched outside one.
+// xterm.js does 24-bit colour and csm paints it faithfully, so the markers are
+// simply false here and are dropped.
+const MULTIPLEXER_ENV = ["TMUX", "TMUX_PANE", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "STY"]
+
+function outerEnv(): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue
+    if (MULTIPLEXER_ENV.includes(key)) continue
+    env[key] = value
+  }
+  return env
+}
+
 export function spawnSession(id: number, cols: number, rows: number, onUpdate: () => void, opts: SpawnOpts) {
   const xterm = new XTerm({ cols, rows, allowProposedApi: true })
   pinnedToBottom.add(id)
@@ -161,7 +181,7 @@ export function spawnSession(id: number, cols: number, rows: number, onUpdate: (
       terminal: pty,
       cwd: opts.cwd,
       env: {
-        ...process.env,
+        ...outerEnv(),
         // The emulator on this PTY is xterm.js, not whatever terminal csm was
         // launched from — passing the outer TERM through (kitty, ghostty, …)
         // makes the child read terminfo for features xterm.js lacks. It does

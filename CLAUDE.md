@@ -104,6 +104,13 @@ into an off-screen grid, then copied into the terminal box each frame.
   unpainted terminal shows at the edges.
 - Overlay rows are keyed by **viewport slot**, not by line index: keying by
   index rebuilds every renderable on each scroll.
+- A session's env describes **this PTY**, not the terminal csm was launched
+  from. `TERM` is forced to `xterm-256color` (xterm.js has none of kitty's or
+  ghostty's extras) and the multiplexer markers — `TMUX`, `TMUX_PANE`,
+  `TERM_PROGRAM`, `STY` — are dropped: Claude Code reads them as "24-bit colour
+  will not survive" and quantizes every hex it renders to the 256-colour cube,
+  so a csm launched from a tmux pane used to render themes in flat cube colours
+  while the same session outside tmux looked right.
 
 ## Workflow
 
